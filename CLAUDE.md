@@ -1,6 +1,6 @@
 # CLAUDE.md — CENTRARCADE
 
-Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html` (currently `centrarcade.html` — rename on first commit).
+Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`. Roster is currently **five** games (STACK, SCAN, CHAIN, SWINGBALL, CHATTER); two more (SCRAMBLE, KNUCKLEBONES) are still on the roadmap.
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap of revisions to implement. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -30,7 +30,7 @@ This file has three jobs: (1) hard invariants you must never break, (2) an accur
 | `arc_scan_best` | SCAN best |
 | `arc_chain_best` | CHAIN best (legacy: `chain_best`) |
 | `arc_chatter_best` | CHATTER best |
-| `arc_swing_best` | SWINGBALL best (new — starts fresh, does NOT inherit CHAIN's history) |
+| `arc_swing_best` | SWINGBALL best (starts fresh, does NOT inherit CHAIN's history) |
 | `arc_scramble_best` | SCRAMBLE best (new) |
 | `arc_bones_best` | KNUCKLEBONES best (new) |
 | `arc_gauntlet_best` | Best free-play gauntlet total (new) |
@@ -45,7 +45,7 @@ This file has three jobs: (1) hard invariants you must never break, (2) an accur
 
 ### Shared engine (top of file)
 - `PALS` — six palettes `{top, bot, ring, acc, glow, sky}`. CHAIN and CHATTER cycle palettes per stage.
-- Helpers: `wrap(a)` (angle → −π..π), `rr(x,y,w,h,r)` (rounded-rect path; caller fills/strokes).
+- Helpers: `wrap(a)` (angle → −π..π), `rr(x,y,w,h,r)` (rounded-rect path; caller fills/strokes), `segDist(px,py,ax,ay,bx,by)` (point→segment distance — used by SCAN's swept-beam collision).
 - Audio: `beep`, semantic wrappers `sHit/sPerfect/sGold/sBad/sStage/sTick`; `buzz(ms)` haptics (no-op on iOS Safari — never rely on it).
 - FX: module-level `parts`/`pops` with `burst()`, `pop()`, `updateFX()`, `drawFX()`. Games clear both arrays in `init()`.
 - Background: `drawBG(pal, skylineY)` — gradient, 4px scanlines, two parallax star layers, procedural skyline, vignette.
@@ -67,34 +67,41 @@ start()   st: 'ready' → 'play'
 update(dt) dt seconds, clamped to 0.05 by the loop
 render()  draws everything incl. HUD and ready/over overlays
 tap(x,y)  ready-start, over-restart (450ms debounce via overAt), gameplay input
+spaceTap  optional bool; when true the spacebar routes to tap() (positionless games: STACK, CHAIN, SWINGBALL). Absent/false ⇒ space is a no-op for that game.
 ```
 
 State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.now() - overAt > 450`.
 
 **Contract extensions required by the roadmap** (add to all games):
-- `par` — number, global par score for gauntlet normalisation (see §5).
+- `par` — number, global par score for gauntlet normalisation (see §5). *So far only on SWINGBALL (provisional 40); still to add to STACK/SCAN/CHAIN/CHATTER before Phase 3.*
 - `seed(rng)` — optional; accept a seeded PRNG for daily runs. Content-seeding only: spawn order, zone placements, disc timings. Physics stays live.
 - `onOver` — optional callback the gauntlet controller sets to hook game-over.
 
 ### Router
-- `mode`: `'menu' | 'game' | 'gauntlet'` (gauntlet is new); `cur` = active game.
-- Menu tap → `cur=g; cur.init(); mode='game'`. Home → discard state, back to menu.
-- Global `tick` drives all pulse/shimmer phases. Frame loop clamps dt to 0.05.
+- `mode`: `'menu' | 'game' | 'gauntlet'` (gauntlet still pending); `cur` = active game.
+- Menu tap → `cur=g; cur.init(); mode='game'`. Home → discard state, back to menu. Global `tick` drives all pulse/shimmer phases. Frame loop clamps dt to 0.05.
+- **Menu is a paginated 2×2 card list** (`PER_PAGE=4`, `menuPage`, `menuCards()`, `menuNav()`, drawn dots + arrows via `drawArrow()`). Card selection resolves on `pointerup` so a horizontal drag reads as a page swipe; **game taps still fire on `pointerdown`** for zero latency. Swipe, tappable dots/arrows, and ←/→ arrow keys all page.
+- **`paused`** (module-level): set on `visibilitychange` while a game is mid-play; the loop then skips `update`, keeps rendering the frozen frame, and draws `drawPauseOverlay()`. A tap or space resumes; home/mute stay live.
+- **Bests cached** on menu entry via `refreshMenuBests()` → `menuBests` (not `loadBest` per card per frame); refreshed on home-exit so a new best set mid-game shows.
+- **`sc` is recomputed by `resize()`** on `resize`/`orientationchange` only — backing store stays `W*dpr`, the single `setTransform` is never touched per frame (rule 2).
+- **Frame loop starts only after the font is ready**: `document.fonts.load('8px "Press Start 2P"')` raced with a 1.5s timeout fallback, to kill the FOUT.
 
 ---
 
 ## 4. Current games — tuning constants
 
-- **STACK** — block height 42, start width 264, perfect window ±5px, speed 2.4 → cap 9.5 (+0.13/block). Perfect preserves width; ≤6px landing = topple.
-- **SCAN** — 3 lives (escape = life lost); $1/$2/$3 chips + 15% QR (+5 gold). Global speed mult `1 + score*0.02`. Beam extend/retract, tip-point collision.
-- **CHAIN** — R=116, speed 1.7 (+0.05/link, cap 4.2), zone half-width 0.42 → floor 0.14 (−0.012/link, +0.07 on stage-up), stage = 10 links, perfect = inner 33% (+2), post-stage gold zone (+3). Overshoot detection uses `wasInside`/sign-crossing logic — edit with extreme care.
-- **CHATTER** — 5 slots at 72° from −54° (top slot reserved for brand tag), 2 discs live at start, new disc every 2nd stage, stage every 14s, decay 4.0 +2.1/stage. Restrike: ≤20 energy = PERFECT SAVE (+45 energy, +8 pts); ≥80 = +8 energy only; else +30 energy. Score accrues at `3.6 × avgEnergy/100`/s, ×2 during FULL CHATTER (all ≥85). Miss = `fumble()` (−4 all discs). **Note: CHATTER is harder than its scores suggest — do not nerf it, and do not add a time cap. Its difficulty is its cap.**
+- **STACK** — block height 42, start width 264, perfect window `5 + spd*0.4`px (scales with speed), speed 2.4 → cap 9.5 (+0.13/block). Perfect preserves width; ≤6px landing = topple.
+- **SCAN** — 3 lives (escape = life lost); $1/$2/$3 chips + 15% QR (+5 gold). Global speed mult `1 + score*0.02`. Beam extend/retract; collision tests the **segment swept by the tip** each frame (`segDist`), not just the tip point.
+- **CHAIN** — R=116, speed 1.7 (+0.05/link, cap 4.2), zone half-width 0.42 → floor 0.14 (−0.012/link, +0.07 on stage-up), stage = 10 links, perfect = inner 33% (+2), post-stage gold zone (+3). **300ms input grace after stage-up** (`grace` suppresses `breakChain`). Overshoot detection uses `wasInside`/sign-crossing logic — edit with extreme care.
+- **CHATTER** — 5 slots at 72° from −54° (top slot reserved for brand tag), 2 discs live at start, new disc every 2nd stage, stage every 14s, decay 4.0 +2.1/stage. Restrike: ≤20 energy = PERFECT SAVE (+45 energy, +8 pts); ≥80 = +8 energy only; else +30 energy. Score accrues at `3.6 × avgEnergy/100`/s, ×2 during FULL CHATTER (all ≥85). Miss increments `missStreak`; **`fumble()` (−4 all discs) fires only on the 2nd consecutive miss** (one stray tap is free), reset on any restrike. **Note: CHATTER is harder than its scores suggest — do not nerf it, and do not add a time cap. Its difficulty is its cap.**
+- **SWINGBALL** — orbit R=104 at CY=312, pole 120→470. Speed 1.7 (+0.05/hit, cap 4.2), zone half-width 0.42 → floor 0.14 (−0.012/hit), perfect = inner 33%, **slop band = 1.7× zone** (mistimed tap = unwind + survive). Wind meter 0→100 (+20 hit / +30 perfect / −25 mistimed); filling it **banks a LOOP** (score ×`(1+loop)`), resets wind, steps `baseSpeed +0.25` / `baseZone −0.03`. 300ms grace after a loop-bank. Break only on a wild tap (beyond slop) or an untapped overshoot — reuses CHAIN's `wasInside`/sign-cross logic. `par:40` PROVISIONAL. Backyard palette PALS[3] + gold accents. **Constants are provisional — retune from play data.**
 
 ---
 
 ## 5. Roadmap — implement in this order
 
-### Phase 1 — Fixes (do first, small PRs)
+### Phase 1 — Fixes ✅ IMPLEMENTED
+*All seven items shipped. Kept below as the record of what changed and why.*
 1. **Spacebar guard**: space currently calls `cur.tap(-999,-999)` — fires a wasted beam in SCAN and triggers a punishing `fumble()` in CHATTER. Route space only to positionless games (STACK, CHAIN, SWINGBALL); no-op elsewhere. Keyboard is convenience-only; touch is the design target.
 2. **Resize/orientation handler**: recompute `sc` and canvas CSS size on `resize`.
 3. **Font preload**: `document.fonts.load('8px "Press Start 2P"')` (with timeout fallback) before starting the frame loop — kills the FOUT.
@@ -103,10 +110,12 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 6. **Menu perf**: cache bests on menu entry instead of `loadBest` per card per frame. Remove SCAN's duplicate `targets` filter.
 7. **Feel tweaks**: STACK perfect window scales gently with speed (`5 + spd*0.4`); CHAIN gets 300ms input grace after stage-up slow-mo; CHATTER fumbles only on the second consecutive miss (single stray tap = free).
 
-### Phase 2 — New games (three, plus menu redesign)
+### Phase 2 — New games (three, plus menu redesign) — 🔶 SWINGBALL + menu ✅; SCRAMBLE, KNUCKLEBONES pending
 Seven games total during the trial period (all four existing + three new). None are pruned yet — pruning happens later from play data. The 2×2 menu must become a scrollable or paginated card list; keep card visual language identical.
 
-**SWINGBALL** (`id:'swing'`, fresh `arc_swing_best`, no CHAIN inheritance)
+*Status: menu redesign done — **paginated** 2×2 list (`PER_PAGE=4`), card language unchanged, swipe/dots/arrows/arrow-keys. Roster is five (STACK, SCAN, CHAIN, SWINGBALL, CHATTER); SCRAMBLE + KNUCKLEBONES still to build. Gauntlet order already wired: SWINGBALL sits between CHAIN and CHATTER in `GAMES`.*
+
+**SWINGBALL** (`id:'swing'`, fresh `arc_swing_best`, no CHAIN inheritance) — ✅ IMPLEMENTED (see §4 for shipped constants; all provisional)
 - Adapted from CHAIN's ring-timing core but a separate game — CHAIN stays in the roster unchanged.
 - Ball orbits a pole; tap to strike when it crosses the hit zone. The differentiator: a **spiral wind meter** — clean hits wind the rope up the pole (visible spiral climbing), mistimed hits unwind it. It is **endless**: reaching the top doesn't end the run, it banks a LOOP (score multiplier tier +1), rope resets to bottom, speed and zone difficulty step up. Runs end only on a miss/break, CHAIN-style.
 - Backyard palette (green/gold), pole and rope drawn, ball carries the mark.
