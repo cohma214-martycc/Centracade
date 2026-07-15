@@ -18,8 +18,8 @@ canvas { display:block; cursor:pointer; }
 <script>
 'use strict';
 // ════════════════════════════════════════════════════════════════
-//  CENTRARCADE — four quick games, one thumb.
-//  STACK · SCAN · CHAIN · CHATTER   (shared 16-bit engine)
+//  CENTRARCADE — five quick games, one thumb.
+//  STACK · SCAN · CHAIN · SWINGBALL · CHATTER   (shared 16-bit engine)
 // ════════════════════════════════════════════════════════════════
 const c=document.getElementById('c');
 const ctx=c.getContext('2d');
@@ -1106,10 +1106,239 @@ const CHATTER={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME 5: SWINGBALL  (endless tetherball — wind the rope up the pole)
+//  Adapted from CHAIN's ring-timing core, but a separate game (D1):
+//  a spiral WIND meter is the differentiator; filling it banks a LOOP
+//  (score multiplier +1) and steps difficulty up. Only a miss/break ends it.
+// ════════════════════════════════════════════════════════════════
+const SWINGBALL={
+  id:'swing', name:'SWINGBALL', tag:'WIND IT UP',
+  spaceTap:true, // positionless — safe to trigger from the spacebar
+  bestKey:'arc_swing_best', // fresh key — never inherits CHAIN's history (D1)
+  par:40, // PROVISIONAL — retune from play data
+  ranks:[{s:0,t:'DRIVEWAY DEBUT'},{s:15,t:'TIP AND RUN'},{s:35,t:'ONE HAND ONE BOUNCE'},{s:60,t:'SIX AND OUT'},{s:100,t:'OVER THE FENCE'},{s:160,t:'AUTO WICKY'},{s:240,t:'JANDAL SLOGGER'},{s:350,t:'BACKYARD TEST LEGEND'}],
+  CX:W/2, CY:312, R:104,
+  POLE_TOP:120, POLE_BOT:470,
+  START_SPEED:1.7, SPEED_INC:0.05, SPEED_CAP:4.2,
+  START_ZONE:0.42, ZONE_SHRINK:0.012, ZONE_FLOOR:0.14,
+  PERFECT_FRAC:0.33, SLOP:1.7,
+  WIND_MAX:100, WIND_HIT:20, WIND_PERFECT:30, WIND_MISS:25,
+  LOOP_SPEED_STEP:0.25, LOOP_ZONE_STEP:0.03,
+  init(){
+    this.baseSpeed=this.START_SPEED; this.baseZone=this.START_ZONE;
+    this.angle=-Math.PI/2; this.dir=1; this.speed=this.baseSpeed;
+    this.zoneC=wrap(this.angle+2.2); this.zoneHalf=this.baseZone;
+    this.wasInside=false;
+    this.wind=0; this.loop=0;
+    this.score=0; this.hits=0;
+    this.timeScale=1; this.shake=0; this.grace=0; this.flash=0;
+    this.best=loadBest(this.bestKey); // no legacy arg — no CHAIN inheritance
+    this.newBest=false; this.trail=[]; this.ghosts=[]; this.banner=null;
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[3]; }, // backyard green (gold accents added inline)
+  mult(){ return 1+this.loop; },
+  start(){ this.st='play'; },
+  ballPos(a){ return {x:this.CX+Math.cos(a)*this.R, y:this.CY+Math.sin(a)*this.R}; },
+  windHeight(){ return this.POLE_BOT-(this.POLE_BOT-this.POLE_TOP)*(this.wind/this.WIND_MAX); },
+  placeZone(){
+    this.zoneC=wrap(this.angle+this.dir*(1.35+Math.random()*3.0));
+    this.wasInside=false;
+  },
+  bankLoop(){
+    this.loop++; this.wind=0; this.flash=1;
+    this.baseSpeed=Math.min(this.SPEED_CAP,this.baseSpeed+this.LOOP_SPEED_STEP);
+    this.baseZone=Math.max(this.ZONE_FLOOR,this.baseZone-this.LOOP_ZONE_STEP);
+    this.speed=this.baseSpeed; this.zoneHalf=this.baseZone;
+    this.timeScale=0.35; this.grace=0.3; // grace through the slow-mo (mirrors CHAIN)
+    this.banner={t:'LOOP ×'+this.mult()+'!',life:1.5};
+    burst(this.CX,this.CY,'#ffd24a',24,5); burst(this.CX,this.CY,'#fff',8,3);
+    sStage(); buzz(30); this.shake=6;
+  },
+  clean(d){
+    const perfect=Math.abs(d)<=this.zoneHalf*this.PERFECT_FRAC;
+    const gain=(perfect?2:1)*this.mult();
+    this.score+=gain;
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); }
+    this.hits++;
+    const pos=this.ballPos(this.angle);
+    this.ghosts.push({a:this.zoneC,life:1,c:perfect?'#ffffff':this.pal().glow});
+    if(perfect){ burst(pos.x,pos.y,'#ffffff',12,3.6); pop('PERFECT +'+gain,pos.x,pos.y-26,'#ffffff',7); sPerfect(); buzz(18); }
+    else { burst(pos.x,pos.y,this.pal().glow,9,2.8); pop('+'+gain,pos.x,pos.y-24,this.pal().ring,7); sHit(); buzz(12); }
+    this.speed=Math.min(this.SPEED_CAP,this.speed+this.SPEED_INC);
+    this.zoneHalf=Math.max(this.ZONE_FLOOR,this.zoneHalf-this.ZONE_SHRINK);
+    this.wind+=perfect?this.WIND_PERFECT:this.WIND_HIT;
+    if(this.wind>=this.WIND_MAX) this.bankLoop();
+    this.dir*=-1;
+    this.placeZone();
+  },
+  mistime(){
+    const pos=this.ballPos(this.angle);
+    this.wind=Math.max(0,this.wind-this.WIND_MISS); // rope unwinds, but you survive
+    burst(pos.x,pos.y,'#ff9a3a',7,2.4);
+    pop('UNWIND',pos.x,pos.y-22,'#ff9a3a',6);
+    beep(300,0.12,'sawtooth',0.04,180); buzz(10);
+    this.shake=Math.max(this.shake,3);
+    this.dir*=-1;
+    this.placeZone();
+  },
+  breakRope(){
+    if(this.grace>0) return; // loop-bank grace period: no breaks
+    const pos=this.ballPos(this.angle);
+    burst(pos.x,pos.y,'#ff4455',22,5); burst(pos.x,pos.y,'#fff',8,3);
+    this.shake=10; sBad(); buzz(70);
+    this.overAt=performance.now(); this.st='over';
+  },
+  update(dt){
+    this.timeScale+=(1-this.timeScale)*0.055;
+    this.shake*=0.82;
+    if(this.flash>0) this.flash-=0.04;
+    if(this.grace>0) this.grace-=dt;
+    if(this.st==='play'){
+      // overshoot/miss detection ported verbatim from CHAIN — edit with care.
+      const prevD=wrap(this.angle-this.zoneC);
+      this.angle=wrap(this.angle+this.dir*this.speed*dt*this.timeScale);
+      const d=wrap(this.angle-this.zoneC);
+      const inside=Math.abs(d)<=this.zoneHalf;
+      if(inside){ this.wasInside=true; }
+      else if(this.wasInside){
+        if(Math.sign(d)===Math.sign(this.dir)) this.breakRope();
+        this.wasInside=false;
+      } else {
+        if(Math.sign(prevD)!==Math.sign(d)&&Math.abs(prevD)>this.zoneHalf&&Math.abs(d)>this.zoneHalf&&Math.abs(prevD-d)<Math.PI) this.breakRope();
+      }
+    } else if(this.st==='ready'){
+      this.angle=wrap(this.angle+this.dir*0.9*dt);
+    }
+    this.ghosts.forEach(g2=>g2.life-=0.03); this.ghosts=this.ghosts.filter(g2=>g2.life>0);
+    if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
+  },
+  drawPole(){
+    const p=this.pal();
+    rr(this.CX-6,this.POLE_TOP,12,this.POLE_BOT-this.POLE_TOP+8,5); ctx.fillStyle='#3a2a16'; ctx.fill();
+    rr(this.CX-6,this.POLE_TOP,4,this.POLE_BOT-this.POLE_TOP+8,3); ctx.fillStyle='#5a4324'; ctx.fill();
+    rr(this.CX-9,this.POLE_TOP-6,18,8,3); ctx.fillStyle=p.acc; ctx.fill();
+    // spiral wind meter — coils up the pole as the rope winds (gold near full)
+    const topY=this.windHeight();
+    ctx.save(); ctx.lineWidth=3; ctx.lineCap='round';
+    const col=this.wind>=this.WIND_MAX*0.75?'#ffd24a':p.glow;
+    ctx.strokeStyle=col; ctx.shadowColor=col; ctx.shadowBlur=8;
+    ctx.beginPath();
+    let first=true;
+    for(let t=0;t<=1.0001;t+=0.02){
+      const y=this.POLE_BOT-(this.POLE_BOT-topY)*t;
+      const a=t*6*Math.PI*2;
+      const x=this.CX+Math.cos(a)*9;
+      if(first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke(); ctx.restore();
+    ctx.save(); ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=10*this.flash+4;
+    ctx.beginPath(); ctx.arc(this.CX,topY,4,0,Math.PI*2); ctx.fill(); ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    this.drawPole();
+    // orbit ring (the timing plane)
+    ctx.save(); ctx.strokeStyle=p.ring; ctx.globalAlpha=0.12; ctx.lineWidth=12;
+    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke();
+    // hit zone
+    if(this.st==='play'){
+      const pulse=0.75+0.25*Math.sin(tick*0.18);
+      ctx.save(); ctx.lineCap='round';
+      ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=18*pulse;
+      ctx.lineWidth=12; ctx.globalAlpha=0.92;
+      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
+      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
+      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
+      ctx.restore();
+    }
+    // ghosts of past strikes
+    this.ghosts.forEach(g2=>{
+      ctx.globalAlpha=g2.life*0.5;
+      const gp=this.ballPos(g2.a);
+      ctx.strokeStyle=g2.c; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(gp.x,gp.y,13,0,Math.PI*2); ctx.stroke();
+    });
+    ctx.globalAlpha=1;
+    // rope from pole cap to ball, trail, then the ball itself
+    const pos=this.ballPos(this.angle);
+    ctx.strokeStyle='rgba(240,230,200,0.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(this.CX,this.POLE_TOP-2); ctx.lineTo(pos.x,pos.y); ctx.stroke();
+    this.trail.push({x:pos.x,y:pos.y}); if(this.trail.length>12) this.trail.shift();
+    this.trail.forEach((t2,i)=>{
+      const f=i/this.trail.length;
+      ctx.globalAlpha=f*0.30; ctx.fillStyle=p.glow;
+      ctx.beginPath(); ctx.arc(t2.x,t2.y,(5+f*6)/2,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha=1;
+    ctx.save(); ctx.translate(pos.x,pos.y);
+    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.arc(0,0,15,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(0,0,15,0,Math.PI*2); ctx.stroke();
+    drawMark(0,0,20,'#f5ece0');
+    ctx.restore();
+    drawFX();
+    if(this.banner){
+      const b=this.banner;
+      const a2=Math.min(1,b.life*2);
+      const scale=1+(1-Math.min(1,b.life*1.6))*0.25;
+      ctx.save(); ctx.globalAlpha=a2;
+      ctx.translate(this.CX,this.CY-this.R-42); ctx.scale(scale,scale);
+      ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
+      ctx.fillStyle='#fff'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=16;
+      ctx.fillText(b.t,0,0);
+      ctx.restore();
+    }
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff';
+    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76);
+    ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.fillText('BEST '+this.best,W/2,96);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
+    if(this.loop>0){ ctx.shadowColor='#ffaa00'; ctx.shadowBlur=6; }
+    ctx.fillText('LOOP ×'+this.mult(),W/2,116);
+    ctx.shadowBlur=0;
+    const rk=rankFor(this.ranks,this.score);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring;
+    ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){
+      ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)';
+      ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26);
+    }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'SWINGBALL',['TAP WHEN THE BALL CROSSES THE ZONE','CLEAN HITS WIND THE ROPE UP','FILL THE METER TO BANK A LOOP','A WILD SWING SNAPS THE ROPE']);
+    if(this.st==='over') drawOverScreen(p,'ROPE SNAPPED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'BANKED '+this.loop+' LOOPS');
+  },
+  tap(){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){
+      if(performance.now()-this.overAt>450){ this.init(); this.start(); }
+      return;
+    }
+    const d=wrap(this.angle-this.zoneC), ad=Math.abs(d);
+    if(ad<=this.zoneHalf) this.clean(d);
+    else if(ad<=this.zoneHalf*this.SLOP) this.mistime();
+    else this.breakRope();
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,CHAIN,CHATTER];
-let mode='menu', cur=null, paused=false;
+const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER]; // gauntlet order (roadmap §3)
+let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
 
@@ -1122,14 +1351,39 @@ function refreshMenuBests(){
 }
 refreshMenuBests();
 
+// Paginated 2×2 card list — identical card language, scales past four games.
+const PER_PAGE=4;
+function menuPageCount(){ return Math.ceil(GAMES.length/PER_PAGE); }
 function menuCards(){
   const cw=158, chh=164, gx=15, gy=176, gapX=14, gapY=16;
-  return GAMES.map((g,i)=>({
-    g, x:gx+(i%2)*(cw+gapX), y:gy+Math.floor(i/2)*(chh+gapY), w:cw, h:chh
-  }));
+  const start=menuPage*PER_PAGE;
+  const cards=[];
+  for(let i=start;i<Math.min(start+PER_PAGE,GAMES.length);i++){
+    const j=i-start;
+    cards.push({g:GAMES[i], x:gx+(j%2)*(cw+gapX), y:gy+Math.floor(j/2)*(chh+gapY), w:cw, h:chh});
+  }
+  return cards;
+}
+function menuNav(){
+  const n=menuPageCount(), y=H-52, spread=16;
+  const x0=W/2-(n-1)*spread/2;
+  const dots=[];
+  for(let i=0;i<n;i++) dots.push({x:x0+i*spread,y,r:10,page:i});
+  return {
+    dots, y,
+    left: menuPage>0 ? {x:22,y:y-13,w:26,h:26} : null,
+    right: menuPage<n-1 ? {x:W-48,y:y-13,w:26,h:26} : null,
+  };
+}
+function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
+  const cx=r.x+r.w/2, cy=r.y+r.h/2;
+  ctx.save(); ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.beginPath();
+  if(dir<0){ ctx.moveTo(cx+5,cy-7); ctx.lineTo(cx-5,cy); ctx.lineTo(cx+5,cy+7); }
+  else { ctx.moveTo(cx-5,cy-7); ctx.lineTo(cx+5,cy); ctx.lineTo(cx-5,cy+7); }
+  ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],chatter:PALS[3]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -1154,6 +1408,15 @@ function drawMenuIcon(g,cx,cy){
     ctx.shadowBlur=0;
     rr(-27,-8,16,16,5); ctx.fillStyle='#e85d15'; ctx.fill();
     drawMark(-19,0,11,'#f5ece0');
+  } else if(g.id==='swing'){
+    // pole + rope + orbiting ball carrying the mark
+    rr(-3,-22,6,44,3); ctx.fillStyle='#5a4324'; ctx.fill();
+    rr(-9,-26,18,6,2); ctx.fillStyle=PALS[3].acc; ctx.fill();
+    ctx.strokeStyle=PALS[3].glow; ctx.shadowColor=PALS[3].glow; ctx.shadowBlur=8;
+    ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(16,6); ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.beginPath(); ctx.arc(16,6,7,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
+    drawMark(16,6,9,'#f5ece0');
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
@@ -1184,10 +1447,10 @@ function drawMenu(){
   ctx.fillText('CENTRARCADE',W/2,138);
   ctx.shadowBlur=0;
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-  ctx.fillText('FOUR QUICK GAMES \u00b7 ONE THUMB',W/2,158);
+  ctx.fillText('FIVE QUICK GAMES \u00b7 ONE THUMB',W/2,158);
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],chatter:PALS[3]}[g.id];
+    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3]}[g.id];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
@@ -1205,6 +1468,16 @@ function drawMenu(){
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
     ctx.fillText(bb>0?'BEST '+bb:'NEW!',card.x+card.w/2,card.y+142);
   });
+  // page indicator (only when there is more than one page)
+  if(menuPageCount()>1){
+    const nav=menuNav();
+    nav.dots.forEach(d=>{
+      ctx.beginPath(); ctx.arc(d.x,d.y,3,0,Math.PI*2);
+      ctx.fillStyle=d.page===menuPage?'#ffd24a':'rgba(255,255,255,0.3)'; ctx.fill();
+    });
+    if(nav.left) drawArrow(nav.left,-1);
+    if(nav.right) drawArrow(nav.right,1);
+  }
   ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.35)';
   ctx.fillText('PAYMENTS BY CENTRAPAY',W/2,H-32);
   drawMark(W/2,H-17,14,'rgba(245,236,224,0.5)');
@@ -1248,34 +1521,59 @@ function getXY(e){
   const r=c.getBoundingClientRect();
   return {x:(e.clientX-r.left)*(W/r.width), y:(e.clientY-r.top)*(H/r.height)};
 }
-function onTap(e){
+// Game input fires immediately on pointerdown (zero latency for rhythm taps).
+// Menu selection resolves on pointerup so a horizontal drag reads as a page swipe.
+let menuDrag=null;
+function onDown(e){
   e.preventDefault();
   audio();
   const {x,y}=getXY(e);
-  const m=muteRect();
-  if(inR(x,y,m)){ mute=!mute; try{ localStorage.setItem('arc_mute',mute?'1':'0'); }catch(err){} return; }
+  if(inR(x,y,muteRect())){ mute=!mute; try{ localStorage.setItem('arc_mute',mute?'1':'0'); }catch(err){} return; }
   if(mode==='game'){
     if(inR(x,y,homeRect())){ mode='menu'; cur.init(); cur=null; paused=false; refreshMenuBests(); return; }
     if(paused){ paused=false; return; } // consume the resume tap
     cur.tap(x,y);
     return;
   }
-  // menu
+  menuDrag={x0:x,y0:y,moved:false}; // menu: defer to pointerup
+}
+function onMove(e){
+  if(!menuDrag||mode!=='menu') return;
+  if(Math.abs(getXY(e).x-menuDrag.x0)>8) menuDrag.moved=true;
+}
+function onUp(e){
+  if(mode!=='menu'||!menuDrag){ menuDrag=null; return; }
+  const {x,y}=getXY(e), dx=x-menuDrag.x0, moved=menuDrag.moved, n=menuPageCount();
+  menuDrag=null;
+  if(moved){ // swipe left/right between pages
+    if(dx<=-40&&menuPage<n-1){ menuPage++; sTick(0.02); }
+    else if(dx>=40&&menuPage>0){ menuPage--; sTick(0.02); }
+    return;
+  }
+  const nav=menuNav();
+  if(nav.left&&inR(x,y,nav.left)){ menuPage--; sTick(0.02); return; }
+  if(nav.right&&inR(x,y,nav.right)){ menuPage++; sTick(0.02); return; }
+  for(const d of nav.dots){ if(Math.hypot(x-d.x,y-d.y)<=d.r){ menuPage=d.page; sTick(0.02); return; } }
   for(const card of menuCards()){
     if(x>=card.x&&x<=card.x+card.w&&y>=card.y&&y<=card.y+card.h){
-      cur=card.g; cur.init(); mode='game'; paused=false;
-      sHit();
-      return;
+      cur=card.g; cur.init(); mode='game'; paused=false; sHit(); return;
     }
   }
 }
-c.addEventListener('pointerdown',onTap);
+c.addEventListener('pointerdown',onDown);
+c.addEventListener('pointermove',onMove);
+c.addEventListener('pointerup',onUp);
+c.addEventListener('pointercancel',()=>{ menuDrag=null; });
 window.addEventListener('keydown',e=>{
   if(e.code==='Space'){
     e.preventDefault();
     if(paused){ paused=false; return; }
     // Keyboard is convenience-only: route space only to positionless games.
     if(mode==='game'&&cur&&cur.spaceTap) cur.tap();
+  } else if(mode==='menu'&&(e.code==='ArrowLeft'||e.code==='ArrowRight')){
+    e.preventDefault();
+    if(e.code==='ArrowLeft'&&menuPage>0) menuPage--;
+    if(e.code==='ArrowRight'&&menuPage<menuPageCount()-1) menuPage++;
   }
 });
 
