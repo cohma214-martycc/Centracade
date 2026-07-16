@@ -113,6 +113,16 @@ function loadBest(key,legacy){
   return v;
 }
 function saveBest(key,v){ try{ localStorage.setItem(key,v); }catch(e){} }
+function loadStr(key){ try{ return localStorage.getItem(key)||''; }catch(e){ return ''; } }
+function saveStr(key,v){ try{ localStorage.setItem(key,v); }catch(e){} }
+
+// ── Daily PRNG + dates (Phase 4) ─────────────────────────────────
+// mulberry32: tiny deterministic PRNG so a day's seed replays identically for everyone.
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++) h=Math.imul(h^s.charCodeAt(i),16777619); return h>>>0; }
+function dayKeyOf(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// Content RNG: seeded stream in the daily, plain Math.random in free play.
+function srnd(g){ return g.srng ? g.srng() : Math.random(); }
 
 // ── Shared FX ────────────────────────────────────────────────────
 let parts=[], pops=[];
@@ -427,13 +437,13 @@ const SCAN={
     parts=[]; pops=[];
   },
   spawn(){
-    const fromLeft=Math.random()<0.5;
-    const ti=Math.random()<0.15?2:(Math.random()<0.5?0:(Math.random()<0.5?1:3));
+    const fromLeft=srnd(this)<0.5;
+    const ti=srnd(this)<0.15?2:(srnd(this)<0.5?0:(srnd(this)<0.5?1:3));
     const ty=this.TYPES[ti];
     const sm=1+this.score*0.02;
     this.targets.push({
       x:fromLeft?-40:W+40,
-      y:80+Math.random()*(H*0.52),
+      y:80+srnd(this)*(H*0.52),
       vx:(fromLeft?1:-1)*(ty.speed*sm+Math.random()*0.4),
       vy:(Math.random()-0.5)*0.3,
       type:ty, bob:Math.random()*Math.PI*2, alive:true,
@@ -648,7 +658,7 @@ const CHAIN={
   start(){ this.st='play'; },
   chipPos(a){ return {x:this.CX+Math.cos(a)*this.R, y:this.CY+Math.sin(a)*this.R}; },
   placeZone(){
-    this.zoneC=wrap(this.angle+this.dir*(1.35+Math.random()*3.0));
+    this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
     this.wasInside=false;
     this.zoneGold=this.nextGold; this.nextGold=false;
   },
@@ -1151,7 +1161,7 @@ const SWINGBALL={
   ballPos(a){ return {x:this.CX+Math.cos(a)*this.R, y:this.CY+Math.sin(a)*this.R}; },
   windHeight(){ return this.POLE_BOT-(this.POLE_BOT-this.POLE_TOP)*(this.wind/this.WIND_MAX); },
   placeZone(){
-    this.zoneC=wrap(this.angle+this.dir*(1.35+Math.random()*3.0));
+    this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
     this.wasInside=false;
   },
   bankLoop(){
@@ -1367,7 +1377,7 @@ const SCRAMBLE={
     const cols=['#ff6a8a','#4aa3ff','#ffd24a','#5fe89a','#c89aff'];
     this.kids=xs.map((x,i)=>({
       x, i, active:(i>=1&&i<=3), haul:(i>=1&&i<=3)?70:0,
-      decayMul:0.8+Math.random()*0.6, away:0, bob:Math.random()*Math.PI*2,
+      decayMul:0.8+srnd(this)*0.6, away:0, bob:Math.random()*Math.PI*2,
       color:cols[i], happy:0,
     }));
     this.lollies=[];
@@ -1636,11 +1646,11 @@ const KNUCKLEBONES={
     const cfg=this.rungCfg(), total=cfg.c+cfg.s;
     const spd=this.baseSpd*cfg.spd, lv=this.BASE_LV*spd, g=this.BASE_G*spd*spd;
     const slots=this.SLOTS.slice();
-    for(let i=slots.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=slots[i]; slots[i]=slots[j]; slots[j]=t; }
+    for(let i=slots.length-1;i>0;i--){ const j=(srnd(this)*(i+1))|0; const t=slots[i]; slots[i]=slots[j]; slots[j]=t; }
     const roles=[];
     for(let i=0;i<cfg.c;i++) roles.push('catch');
     for(let i=0;i<cfg.s;i++) roles.push('skip');
-    for(let i=roles.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=roles[i]; roles[i]=roles[j]; roles[j]=t; }
+    for(let i=roles.length-1;i>0;i--){ const j=(srnd(this)*(i+1))|0; const t=roles[i]; roles[i]=roles[j]; roles[j]=t; }
     this.bones=[];
     for(let i=0;i<total;i++){
       this.bones.push({x:slots[i], y:this.CATCH_LINE, vy:-lv, vx:(Math.random()-0.5)*16, g,
@@ -1810,6 +1820,16 @@ const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // gaunt
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
+// Daily content-seeding: each game accepts a seeded PRNG; srng=null ⇒ free play (Math.random).
+// Content-seeding only (spawn/zone/toss/mix) — physics & cosmetics stay live (see srnd()).
+GAMES.forEach(g=>{ g.srng=null; if(!g.seed) g.seed=function(rng){ this.srng=rng||null; }; });
+
+// The daily. Working name TUCK SHOP RUN (owner pick). Other 90s-NZ candidates
+// the owner floated: PLAYLUNCH, THE TUCK RUN, MORNING TEA, AFTER THE BELL.
+const DAILY_NAME='TUCK SHOP RUN';
+const DAILY_EPOCH='2026-07-16'; // day 1 = ship date; #N counts from here (local time)
+function dailyNumber(){ return Math.floor((Date.parse(dayKeyOf(new Date()))-Date.parse(DAILY_EPOCH))/86400000)+1; }
+function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getItem('arc_daily_state')||'null'); }catch(e){} return !!(st&&st.dayKey===dayKeyOf(new Date())&&st.played); }
 
 // ════════════════════════════════════════════════════════════════
 //  GAUNTLET  (Phase 3 — every game, one score)
@@ -1826,20 +1846,45 @@ const GAUNTLET={
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   begin(){
+    this.daily=false; this.locked=false; this.toast=null;
     this.order=GAMES; this.idx=0; this.total=0; this.results=[];
     this.best=loadBest(this.bestKey); this.newBest=false;
     mode='gauntlet'; paused=false;
     this.launch();
   },
+  beginDaily(){
+    const dk=dayKeyOf(new Date());
+    this.daily=true; this.toast=null; this.dayKey=dk;
+    this.dailyN=dailyNumber();
+    this.streak=loadBest('arc_daily_streak');
+    let st=null; try{ st=JSON.parse(localStorage.getItem('arc_daily_state')||'null'); }catch(e){}
+    mode='gauntlet'; paused=false;
+    if(st && st.dayKey===dk && st.played){
+      // one attempt per day already used — show the locked result (or forfeit notice)
+      this.locked=true;
+      this.total=st.total||0;
+      this.results=(st.result||[]).map(r=>({name:r.name, contrib:r.contrib, rank:r.rank, pal:PALS[r.pid!=null?r.pid:2]}));
+      this.emojiGrid=st.emojiGrid||'';
+      this.state='end'; this.overAt=performance.now();
+      return;
+    }
+    // consume the attempt now: bailing mid-run forfeits the day (true one-attempt)
+    this.locked=false; this.order=GAMES; this.idx=0; this.total=0; this.results=[];
+    this.seedBase=hashStr(dk);
+    saveStr('arc_daily_state',JSON.stringify({dayKey:dk,played:true}));
+    this.launch();
+  },
   launch(){
     cur=this.order[this.idx];
+    if(this.daily) cur.seed(mulberry32(this.seedBase + this.idx*101)); // per-game deterministic stream
+    else cur.srng=null;                                                // free gauntlet stays live-random
     cur.init();
     cur.onOver=()=>this.capture();   // game runs its own ready→play→over
     this.state='playing';
   },
   capture(){
     const g=cur, score=Math.floor(g.score||0);
-    this.results.push({name:g.name, score, contrib:this.contribOf(score,g.par), rank:rankFor(g.ranks,score).t, pal:this.gamePal(g)});
+    this.results.push({name:g.name, id:g.id, score, contrib:this.contribOf(score,g.par), rank:rankFor(g.ranks,score).t, pal:this.gamePal(g)});
     this.total+=this.results[this.results.length-1].contrib;
     g.onOver=null;                    // one-shot — guards double-fire
     this.overAt=performance.now();
@@ -1849,24 +1894,72 @@ const GAUNTLET={
   advance(){ this.idx++; this.launch(); },
   finish(){
     this.state='end'; this.overAt=performance.now();
+    if(this.daily){
+      // streak: +1 if yesterday was completed, else reset to 1
+      const yk=dayKeyOf(new Date(Date.parse(this.dayKey)-86400000));
+      this.streak=(loadStr('arc_daily_lastdone')===yk)?loadBest('arc_daily_streak')+1:1;
+      saveBest('arc_daily_streak',this.streak); saveStr('arc_daily_lastdone',this.dayKey);
+      this.emojiGrid=this.buildEmojiGrid();
+      const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:this.PALMAP[r.id]!=null?this.PALMAP[r.id]:2}));
+      saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
+      sGold(); return;
+    }
     if(this.total>this.best){ this.best=this.total; this.newBest=true; saveBest(this.bestKey,this.total); refreshMenuBests(); }
     sGold();
   },
   exit(){
-    if(cur) cur.onOver=null;
+    if(cur){ cur.onOver=null; cur.srng=null; }
     cur=null; mode='menu'; paused=false; refreshMenuBests();
+  },
+  forfeited(){ return this.locked && !this.results.length; },
+  buildEmojiGrid(){
+    const tier=c=>c<100?'⬛':c<200?'🟨':c<350?'🟧':c<500?'🟩':'🟪';
+    return this.results.map(r=>tier(r.contrib)).join('');
+  },
+  shareText(){ return DAILY_NAME+' #'+this.dailyN+'\n'+this.emojiGrid+'\nTOTAL '+this.total+' · STREAK '+this.streak; },
+  showToast(t){ this.toast={t,life:1.6}; },
+  shareGrid(){
+    const txt=this.shareText();
+    try{
+      if(navigator.share){ navigator.share({text:txt}).catch(()=>{}); this.showToast('SHARED!'); return; }
+      if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(()=>this.showToast('COPIED!'),()=>this.showToast('COPY FAILED')); return; }
+    }catch(e){}
+    this.showToast('COPY UNAVAILABLE');
+  },
+  shareCard(){ this.state='sharecard'; this.overAt=performance.now(); this.cardCapture=true; },
+  tryShareCanvas(){
+    try{
+      if(c.toBlob&&navigator.canShare){
+        c.toBlob(b=>{ try{ const f=new File([b],'tuckshoprun.png',{type:'image/png'}); if(navigator.canShare({files:[f]})) navigator.share({files:[f]}).catch(()=>{}); }catch(e){} },'image/png');
+      }
+    }catch(e){}
+  },
+  copyRect(){ return {x:34,y:H-104,w:132,h:36}; },
+  shareRect(){ return {x:W-166,y:H-104,w:132,h:36}; },
+  drawBtn(r,label,pal){
+    rr(r.x,r.y,r.w,r.h,8); ctx.fillStyle=pal.acc+'55'; ctx.fill();
+    ctx.strokeStyle=pal.ring; ctx.lineWidth=2; rr(r.x,r.y,r.w,r.h,8); ctx.stroke();
+    ctx.textAlign='center'; ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(label,r.x+r.w/2,r.y+r.h/2+3);
   },
   update(dt){ if(this.state==='playing'&&cur) cur.update(dt); },
   render(){
     if(this.state==='playing'&&cur){ cur.render(); this.drawStrip(); }
     else if(this.state==='interstitial') this.drawInterstitial();
-    else if(this.state==='end') this.drawEnd();
+    else if(this.state==='sharecard') this.drawSharecard();
+    else if(this.state==='end'){ if(this.daily) this.drawDailyEnd(); else this.drawEnd(); }
   },
   tap(x,y){
     if(this.state==='playing'&&cur){ cur.tap(x,y); return; }
+    if(this.state==='sharecard'){ this.state='end'; this.overAt=performance.now(); return; }
     if(performance.now()-this.overAt<=450) return; // debounce
-    if(this.state==='interstitial') this.advance();
-    else if(this.state==='end') this.exit();
+    if(this.state==='interstitial'){ this.advance(); return; }
+    if(this.state==='end'){
+      if(this.daily && !this.forfeited()){
+        if(inR(x,y,this.copyRect())){ this.shareGrid(); return; }
+        if(inR(x,y,this.shareRect())){ this.shareCard(); return; }
+      }
+      this.exit();
+    }
   },
   drawStrip(){
     ctx.save(); ctx.textAlign='center';
@@ -1918,6 +2011,42 @@ const GAUNTLET={
     ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP FOR MENU',W/2,H-38);
     ctx.globalAlpha=1;
   },
+  drawDailyEnd(){
+    const p=PALS[2]; drawBG(p); drawFX();
+    ctx.textAlign='center';
+    ctx.font='12px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=14; ctx.fillText(DAILY_NAME,W/2,52); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('#'+this.dailyN+'  ·  '+this.dayKey,W/2,70);
+    if(this.forfeited()){
+      ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ff6a8a'; ctx.fillText('ATTEMPT USED',W/2,150);
+      ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('COME BACK TOMORROW',W/2,176);
+      ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
+      ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP FOR MENU',W/2,H-40); ctx.globalAlpha=1;
+      return;
+    }
+    ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(this.total,W/2,110); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+this.streak,W/2,132);
+    this.drawBars(this.results,158,30,true);
+    this.drawBtn(this.copyRect(),'COPY',PALS[3]);
+    this.drawBtn(this.shareRect(),'SHARE',PALS[5]);
+    if(this.toast&&this.toast.life>0){ ctx.save(); ctx.globalAlpha=Math.min(1,this.toast.life); ctx.textAlign='center'; ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[3].glow; ctx.shadowBlur=8; ctx.fillText(this.toast.t,W/2,H-116); ctx.restore(); this.toast.life-=0.02; }
+    ctx.textAlign='center'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText('TAP OUTSIDE FOR MENU',W/2,H-16);
+  },
+  drawSharecard(){
+    // A composed card painted straight to the visible canvas: share = c.toBlob;
+    // fallback = the player screenshots it. Reuses the global-ctx draw helpers.
+    drawBG(PALS[2]);
+    ctx.save(); ctx.translate(W/2,72); ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=18;
+    rr(-26,-26,52,52,12); ctx.fillStyle='#e85d15'; ctx.fill(); ctx.shadowBlur=0; drawMark(0,1,38,'#f5ece0'); ctx.restore();
+    ctx.textAlign='center';
+    ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=10; ctx.fillText(DAILY_NAME+' #'+this.dailyN,W/2,130); ctx.shadowBlur=0;
+    ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(this.dayKey,W/2,148);
+    ctx.font='32px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=16; ctx.fillText(this.total,W/2,196); ctx.shadowBlur=0;
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('STREAK '+this.streak,W/2,216);
+    this.drawBars(this.results,248,32,true);
+    ctx.strokeStyle='rgba(255,210,74,0.45)'; ctx.lineWidth=2; rr(8,8,W-16,H-16,12); ctx.stroke();
+    ctx.globalAlpha=0.6+0.4*Math.sin(tick*0.1); ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('SCREENSHOT ME  ·  TAP TO CLOSE',W/2,H-22); ctx.globalAlpha=1;
+    if(this.cardCapture){ this.cardCapture=false; this.tryShareCanvas(); }
+  },
 };
 // Menu shows the GAUNTLET card first, then the seven games.
 const MENU_ITEMS=[GAUNTLET,...GAMES];
@@ -1935,7 +2064,7 @@ refreshMenuBests();
 const PER_PAGE=4;
 function menuPageCount(){ return Math.ceil(MENU_ITEMS.length/PER_PAGE); }
 function menuCards(){
-  const cw=158, chh=164, gx=15, gy=176, gapX=14, gapY=16;
+  const cw=158, chh=150, gx=15, gy=222, gapX=14, gapY=14;
   const start=menuPage*PER_PAGE;
   const cards=[];
   for(let i=start;i<Math.min(start+PER_PAGE,MENU_ITEMS.length);i++){
@@ -2047,6 +2176,23 @@ function drawMenuIcon(g,cx,cy){
   }
   ctx.restore();
 }
+function dailyBannerRect(){ return {x:15,y:168,w:W-30,h:42}; }
+function drawDailyBanner(){
+  const r=dailyBannerRect(), played=dailyPlayedToday();
+  const g=ctx.createLinearGradient(r.x,r.y,r.x,r.y+r.h);
+  g.addColorStop(0,PALS[5].acc+'44'); g.addColorStop(1,'#0c0c14');
+  rr(r.x,r.y,r.w,r.h,10); ctx.fillStyle=g; ctx.fill();
+  ctx.strokeStyle=PALS[5].ring; ctx.lineWidth=2; ctx.globalAlpha=0.75+0.25*Math.sin(tick*0.06); rr(r.x,r.y,r.w,r.h,10); ctx.stroke(); ctx.globalAlpha=1;
+  drawMark(r.x+26,r.y+r.h/2,22,'#ffd24a');
+  ctx.textAlign='left';
+  ctx.font='9px "Press Start 2P"'; ctx.fillStyle=PALS[5].ring; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=6;
+  ctx.fillText(DAILY_NAME,r.x+48,r.y+19); ctx.shadowBlur=0;
+  ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)';
+  ctx.fillText('DAILY #'+dailyNumber()+(played?'  ·  DONE':'  ·  ONE ATTEMPT'),r.x+48,r.y+32);
+  ctx.textAlign='right'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
+  ctx.fillText(played?('STREAK '+loadBest('arc_daily_streak')):'► PLAY',r.x+r.w-14,r.y+r.h/2+3);
+  ctx.textAlign='center';
+}
 function drawMenu(){
   drawBG(PALS[2]);
   ctx.textAlign='center';
@@ -2063,6 +2209,7 @@ function drawMenu(){
   ctx.shadowBlur=0;
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
   ctx.fillText('SEVEN QUICK GAMES \u00b7 ONE THUMB',W/2,158);
+  drawDailyBanner();
   menuCards().forEach(card=>{
     const g=card.g;
     const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5],gauntlet:PALS[5]}[g.id];
@@ -2124,7 +2271,7 @@ function frame(t){
     if(!paused) GAUNTLET.update(dt);
     GAUNTLET.render();
     if(paused) drawPauseOverlay();
-    drawChrome(true);
+    if(GAUNTLET.state!=='sharecard') drawChrome(true); // keep the share card clean
   } else {
     drawMenu();
     drawChrome(false);
@@ -2182,10 +2329,11 @@ function onUp(e){
   if(nav.left&&inR(x,y,nav.left)){ menuPage--; sTick(0.02); return; }
   if(nav.right&&inR(x,y,nav.right)){ menuPage++; sTick(0.02); return; }
   for(const d of nav.dots){ if(Math.hypot(x-d.x,y-d.y)<=d.r){ menuPage=d.page; sTick(0.02); return; } }
+  if(inR(x,y,dailyBannerRect())){ GAUNTLET.beginDaily(); sHit(); return; }
   for(const card of menuCards()){
     if(x>=card.x&&x<=card.x+card.w&&y>=card.y&&y<=card.y+card.h){
       if(card.g.isGauntlet){ GAUNTLET.begin(); sHit(); return; }
-      cur=card.g; cur.onOver=null; cur.init(); mode='game'; paused=false; sHit(); return;
+      cur=card.g; cur.onOver=null; cur.srng=null; cur.init(); mode='game'; paused=false; sHit(); return;
     }
   }
 }
