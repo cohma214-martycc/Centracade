@@ -1,6 +1,6 @@
 # CLAUDE.md — CENTRARCADE
 
-Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`. Roster is currently **six** games (STACK, SCAN, CHAIN, SWINGBALL, CHATTER, SCRAMBLE); one more (KNUCKLEBONES) is still on the roadmap.
+Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`. Roster is the full **seven** games (STACK, SCAN, CHAIN, SWINGBALL, CHATTER, SCRAMBLE, KNUCKLEBONES) — Phase 2 complete.
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap of revisions to implement. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -32,7 +32,7 @@ This file has three jobs: (1) hard invariants you must never break, (2) an accur
 | `arc_chatter_best` | CHATTER best |
 | `arc_swing_best` | SWINGBALL best (starts fresh, does NOT inherit CHAIN's history) |
 | `arc_scramble_best` | SCRAMBLE best |
-| `arc_bones_best` | KNUCKLEBONES best (new) |
+| `arc_bones_best` | KNUCKLEBONES best |
 | `arc_gauntlet_best` | Best free-play gauntlet total (new) |
 | `arc_daily_state` | JSON: `{dayKey, played, result, emojiGrid}` — enforces one attempt/day (new) |
 | `arc_daily_streak` | Consecutive daily completions (new) |
@@ -73,7 +73,7 @@ spaceTap  optional bool; when true the spacebar routes to tap() (positionless ga
 State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.now() - overAt > 450`.
 
 **Contract extensions required by the roadmap** (add to all games):
-- `par` — number, global par score for gauntlet normalisation (see §5). *So far on SWINGBALL (40) and SCRAMBLE (120), both provisional; still to add to STACK/SCAN/CHAIN/CHATTER before Phase 3.*
+- `par` — number, global par score for gauntlet normalisation (see §5). *So far on SWINGBALL (40), SCRAMBLE (120) and KNUCKLEBONES (90), all provisional; still to add to STACK/SCAN/CHAIN/CHATTER before Phase 3.*
 - `seed(rng)` — optional; accept a seeded PRNG for daily runs. Content-seeding only: spawn order, zone placements, disc timings. Physics stays live.
 - `onOver` — optional callback the gauntlet controller sets to hook game-over.
 
@@ -96,6 +96,7 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 - **CHATTER** — 5 slots at 72° from −54° (top slot reserved for brand tag), 2 discs live at start, new disc every 2nd stage, stage every 14s, decay 4.0 +2.1/stage. Restrike: ≤20 energy = PERFECT SAVE (+45 energy, +8 pts); ≥80 = +8 energy only; else +30 energy. Score accrues at `3.6 × avgEnergy/100`/s, ×2 during FULL CHATTER (all ≥85). Miss increments `missStreak`; **`fumble()` (−4 all discs) fires only on the 2nd consecutive miss** (one stray tap is free), reset on any restrike. **Note: CHATTER is harder than its scores suggest — do not nerf it, and do not add a time cap. Its difficulty is its cap.**
 - **SWINGBALL** — orbit R=104 at CY=312, pole 120→470. Speed 1.7 (+0.05/hit, cap 4.2), zone half-width 0.42 → floor 0.14 (−0.012/hit), perfect = inner 33%, **slop band = 1.7× zone** (mistimed tap = unwind + survive). Wind meter 0→100 (+20 hit / +30 perfect / −25 mistimed); filling it **banks a LOOP** (score ×`(1+loop)`), resets wind, steps `baseSpeed +0.25` / `baseZone −0.03`. 300ms grace after a loop-bank. Break only on a wild tap (beyond slop) or an untapped overshoot — reuses CHAIN's `wasInside`/sign-cross logic. `par:40` PROVISIONAL. Backyard palette PALS[3] + gold accents. **Constants are provisional — retune from play data.**
 - **SCRAMBLE** — 5 kid slots (`KID_Y:532`), start 3 active (indices 1–3), wake edges [0,4] on stage-up. Tap a kid → a lolly **arcs** (~0.45s, `t += dt*2.2`) and adds `THROW_GAIN 34` to their haul (cap 100). Per-kid decay `DECAY_BASE 5.0 × decayMul (0.8–1.4)`, `+1.6`/stage, stage every 12s. **Score rewards evenness, not volume**: `SCORE_RATE 5.0 × (1 − stddev/50)` over active hauls; **FAIR SHARE ×2** when live ≥2 and all ≥`FAIR_FLOOR 60` within `FAIR_BAND 20`. Empty meter → kid away `CRY_TIME 1.4`s (returns at `PITY 42`) and −1 life; **3 empties = over**. `par:120` PROVISIONAL. Party palette PALS[4]. **Deferred from spec:** spatial "greedy kids drift to dropped lollies" — v1 uses directed throws that always connect; per-kid decay carries the greedy-kid pressure. **Constants provisional — retune from play data.**
+- **KNUCKLEBONES** — bones tossed on parabolas to `CATCH_LINE:480` from 5 `SLOTS`; base `BASE_LV:660`/`BASE_G:1000` (airtime ~1.2s/spd, peak height constant as spd rises). **Gold = catch** (tap airborne), **grey = skip** (leave). Missed catch OR grey-bone tap = a drop; **3 drops = over**. `RUNGS` ladder = ONESIES→…→OVER THE FENCE (catch/skip/spd per rung; decoys from HORSES on); `CLEARS_PER_RUNG 2` clean tosses advance a rung, then it **loops** (`baseSpd ×1.12`, restart at ONESIES). Score `+2×(1+loop)`/catch, `+5×(1+loop)`/clean toss. No rotation sim — a horizontal frame-flip (every 6 ticks) sells the spin. Drawn grey **asphalt court** (chalk catch-line + play circle); PALS[5] amber accents, bone-cream sprites. `par:90` PROVISIONAL. **Constants provisional — retune from play data.**
 
 ---
 
@@ -111,10 +112,10 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 6. **Menu perf**: cache bests on menu entry instead of `loadBest` per card per frame. Remove SCAN's duplicate `targets` filter.
 7. **Feel tweaks**: STACK perfect window scales gently with speed (`5 + spd*0.4`); CHAIN gets 300ms input grace after stage-up slow-mo; CHATTER fumbles only on the second consecutive miss (single stray tap = free).
 
-### Phase 2 — New games (three, plus menu redesign) — 🔶 SWINGBALL + SCRAMBLE + menu ✅; KNUCKLEBONES pending
+### Phase 2 — New games (three, plus menu redesign) ✅ COMPLETE
 Seven games total during the trial period (all four existing + three new). None are pruned yet — pruning happens later from play data. The 2×2 menu must become a scrollable or paginated card list; keep card visual language identical.
 
-*Status: menu redesign done — **paginated** 2×2 list (`PER_PAGE=4`), card language unchanged, swipe/dots/arrows/arrow-keys. Roster is six (STACK, SCAN, CHAIN, SWINGBALL, CHATTER, SCRAMBLE); KNUCKLEBONES still to build. Gauntlet order wired in `GAMES`: STACK → SCAN → CHAIN → SWINGBALL → CHATTER → SCRAMBLE.*
+*Status: all three new games (SWINGBALL, SCRAMBLE, KNUCKLEBONES) + the menu redesign shipped. Menu is a **paginated** 2×2 list (`PER_PAGE=4`, now two pages), card language unchanged, swipe/dots/arrows/arrow-keys. Full gauntlet order wired in `GAMES`: STACK → SCAN → CHAIN → SWINGBALL → CHATTER → SCRAMBLE → KNUCKLEBONES.*
 
 **SWINGBALL** (`id:'swing'`, fresh `arc_swing_best`, no CHAIN inheritance) — ✅ IMPLEMENTED (see §4 for shipped constants; all provisional)
 - Adapted from CHAIN's ring-timing core but a separate game — CHAIN stays in the roster unchanged.
@@ -129,10 +130,11 @@ Seven games total during the trial period (all four existing + three new). None 
 - Design intent: generosity as plate-spinning. It overlaps CHATTER's attention-juggling, which is fine during the trial — the data decides.
 - *Shipped v1: directed throws (tap a kid, lolly arcs and always connects), per-kid decay, evenness scoring + FAIR SHARE ×2, 3-lives. **Deferred:** the spatial "greedy kids drift toward dropped lollies" mechanic — per-kid decay carries the greedy-kid pressure until it lands.*
 
-**KNUCKLEBONES** (`id:'bones'`, `arc_bones_best`)
+**KNUCKLEBONES** (`id:'bones'`, `arc_bones_best`) — ✅ IMPLEMENTED (see §4 for shipped constants; all provisional)
 - Digitised knucklebones. Five bones toss up; tap-catch them in the pattern the current level demands before they land. The traditional sequence **is the rank/level ladder**: ONESIES → TWOSIES → THREESIES → FOURSIES → CLICKS → HORSES IN THE STABLE → OVER THE FENCE. Endless via speed/height variation loops after the ladder completes.
 - Discrete timing with combinatorial catch patterns (catch 2-then-2, catch all-but-one, etc.). Missed catch = drop; 3 drops = over.
 - Bone-coloured sprites on a schoolyard-asphalt palette; keep physics simple (parabolic, no rotation sim needed — a spin frame-flip sells it).
+- *Shipped v1: gold bones = catch (tap airborne), grey = skip decoys (leave them, tapping one faults); missed catch OR grey-bone tap = a drop, 3 drops = over. Ladder rungs set catch/skip counts + speed (decoys from HORSES on); 2 clean tosses advance a rung, then loops faster. Frame-flip spin, drawn asphalt court, PALS[5] accents. **Palette note:** no grey palette exists and adding a 7th `PALS` entry would shift CHAIN/CHATTER's `stage % PALS.length` cycling, so the asphalt court is drawn directly and PALS[5] supplies accents.*
 
 ### Phase 3 — GAUNTLET (free play)
 - Fifth-slot menu card: **GAUNTLET — EVERY GAME, ONE SCORE**. Plays ALL roster games in fixed order (STACK → SCAN → CHAIN → SWINGBALL → CHATTER → SCRAMBLE → BONES), each to first game-over.
