@@ -1,6 +1,6 @@
 # CLAUDE.md — CENTRARCADE
 
-Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`. Roster is the full **seven** games (STACK, SCAN, CHAIN, SWINGBALL, CHATTER, SCRAMBLE, KNUCKLEBONES) — Phase 2 complete.
+Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`. Roster is the full **seven** games (STACK, SCAN, CHAIN, SWINGBALL, CHATTER, SCRAMBLE, KNUCKLEBONES). **Phases 1–4 shipped**: fixes, the seven-game roster + paginated menu, the free-play GAUNTLET, and the once-a-day seeded **TUCK SHOP RUN** daily. Phases 5–6 (mutators, creature) are still to come.
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap of revisions to implement. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -33,9 +33,10 @@ This file has three jobs: (1) hard invariants you must never break, (2) an accur
 | `arc_swing_best` | SWINGBALL best (starts fresh, does NOT inherit CHAIN's history) |
 | `arc_scramble_best` | SCRAMBLE best |
 | `arc_bones_best` | KNUCKLEBONES best |
-| `arc_gauntlet_best` | Best free-play gauntlet total (new) |
-| `arc_daily_state` | JSON: `{dayKey, played, result, emojiGrid}` — enforces one attempt/day (new) |
-| `arc_daily_streak` | Consecutive daily completions (new) |
+| `arc_gauntlet_best` | Best free-play gauntlet total |
+| `arc_daily_state` | JSON: `{dayKey, played, total, result, emojiGrid}` — enforces one attempt/day (consumed at start) |
+| `arc_daily_streak` | Consecutive daily completions |
+| `arc_daily_lastdone` | dayKey of the last completed daily (for streak continuity) |
 | `arc_mut_best_<gameid>_<mutid>` | Per-game per-mutator bests, separate from clean bests (new) |
 | `arc_creature` | JSON creature state: `{xp, stage, hatchedAt}` (new) |
 
@@ -74,7 +75,7 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 
 **Contract extensions required by the roadmap** (add to all games):
 - `par` — number, global par score for gauntlet normalisation (see §5). *Now on all seven games, all provisional: STACK 20, SCAN 35, CHAIN 50, SWINGBALL 40, CHATTER 600 (owner median — CHATTER plays far harder than its ranks), SCRAMBLE 120, KNUCKLEBONES 90.*
-- `seed(rng)` — optional; accept a seeded PRNG for daily runs. Content-seeding only: spawn order, zone placements, disc timings. Physics stays live.
+- `seed(rng)` — accept a seeded PRNG for daily runs. Content-seeding only: spawn order, zone placements, disc timings. Physics stays live. *Wired: every game has `seed(rng)` (sets `this.srng`) + a shared `srnd(g)` = `g.srng ? g.srng() : Math.random()`. Only content calls route through `srnd` (SCAN spawn side/type/y, CHAIN+SWINGBALL zone, SCRAMBLE kid mix, BONES toss shuffles; STACK/CHATTER are already deterministic). `srng=null` ⇒ free play stays byte-identical; cleared at every non-daily entry.*
 - `onOver` — optional callback the gauntlet controller sets to hook game-over. *Wired: each game calls `if(this.onOver) this.onOver()` at its over-transition; the controller registers it, clears it one-shot (double-fire safe), and free-play resets it to null.*
 
 ### Router
@@ -83,6 +84,7 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 - **Menu is a paginated 2×2 card list** over `MENU_ITEMS` = `[GAUNTLET, ...GAMES]` (`PER_PAGE=4`, `menuPage`, `menuCards()`, `menuNav()`, drawn dots + arrows via `drawArrow()`). The GAUNTLET card is the **first tile** (eight cards → two pages). Card selection resolves on `pointerup` so a horizontal drag reads as a page swipe; **game taps still fire on `pointerdown`** for zero latency. Swipe, tappable dots/arrows, and ←/→ arrow keys all page.
 - **`paused`** (module-level): set on `visibilitychange` while a game is mid-play (in `game` **or** `gauntlet` mode); the loop then skips `update`, keeps rendering the frozen frame, and draws `drawPauseOverlay()`. A tap or space resumes; home/mute stay live.
 - **`GAUNTLET`** (Phase 3 controller, outside the game contract): `mode='gauntlet'` sequences all games in `GAMES` order to first game-over each via each game's `onOver` hook, normalises (`round(score/par × 250)`, cap 625) into a running `total`, and renders interstitials + an end card writing `arc_gauntlet_best`. Reads only public fields (`score`/`par`/`ranks`/`name`); never mutates game internals. Free-play resets `cur.onOver=null` on selection, so the hook is a no-op outside the gauntlet. See §5 Phase 3.
+- **THE DAILY** (Phase 4) is the **same `GAUNTLET` controller with `daily=true`** (`beginDaily()`): seeds each game (`cur.seed(mulberry32(hash(dayKey)+idx*101))`) before `init()`, enforces one attempt/day via `arc_daily_state`, tracks `#N`/streak, and adds `interstitial`→`end`→`sharecard` states. Menu entry is the drawn **TUCK SHOP RUN** banner (not a grid card). See §5 Phase 4.
 - **Bests cached** on menu entry via `refreshMenuBests()` → `menuBests` (not `loadBest` per card per frame); refreshed on home-exit so a new best set mid-game shows.
 - **`sc` is recomputed by `resize()`** on `resize`/`orientationchange` only — backing store stays `W*dpr`, the single `setTransform` is never touched per frame (rule 2).
 - **Frame loop starts only after the font is ready**: `document.fonts.load('8px "Press Start 2P"')` raced with a 1.5s timeout fallback, to kill the FOUT.
@@ -145,14 +147,16 @@ Seven games total during the trial period (all four existing + three new). None 
 - Implemented as a `GAUNTLET` controller object outside the game contract (see §3) — it sequences `cur`, hooks `onOver`, accumulates, renders interstitials. Game internals untouched.
 - *Shipped: `mode='gauntlet'` wired into the frame loop, input (home exits via `GAUNTLET.exit()`, taps forward to the controller), Space, and the `visibilitychange` pause. New key `arc_gauntlet_best` (already in §2). Drawn gold card + "seven palette chips under one gold mark" icon.*
 
-### Phase 4 — THE DAILY (one attempt, shareable)
-- A daily seeded gauntlet, **one attempt per calendar day** (local time), enforced via `arc_daily_state`. Individual games remain unlimited free-play. Streak counter in `arc_daily_state`/`arc_daily_streak`.
-- **Seeding**: seed a small PRNG (mulberry32) from the local date string. Content-seeding only via each game's `seed(rng)`: STACK slider start sides, SCAN spawn schedule/types, CHAIN zone placements + gold order, SWINGBALL zone placements, CHATTER slot wake order, SCRAMBLE kid mix, BONES toss patterns. Same challenge for everyone, not same replay.
-- Daily numbering: `#N` where day 1 = the launch date constant (`DAILY_EPOCH`, set at ship time).
-- **Name**: needs a 90s-NZ word. Candidates to surface in a menu-copy comment for the owner to pick: **PLAYLUNCH**, **THE TUCK RUN**, **MORNING TEA**, **AFTER THE BELL**. Use `PLAYLUNCH` as the working title until overridden.
-- **Share (both A and B)**:
-  - **B — emoji grid**: on completion, build a text block — title, `#N`, one emoji tile per game coloured by contribution tier (⬛ <100 / 🟨 100–199 / 🟧 200–349 / 🟩 350–499 / 🟪 500+), total, streak. `navigator.share` text, clipboard fallback with a COPIED! toast.
-  - **A — share card**: render a composed end card to an offscreen canvas (total large, per-game bars + rank titles, date + daily number, Centrapay mark as crest, palette-consistent). `canvas.toBlob()` → `navigator.share({files})`; fallback: draw it full-screen with a "screenshot me" frame. Card must look deliberate — it is the product's face in group chats.
+### Phase 4 — THE DAILY (one attempt, shareable) ✅ COMPLETE — **TUCK SHOP RUN**
+- A daily seeded gauntlet, **one attempt per calendar day** (local time), enforced via `arc_daily_state`. Individual games remain unlimited free-play. Streak counter in `arc_daily_streak` (+ `arc_daily_lastdone` for continuity).
+- **Seeding**: `mulberry32` seeded from the local date (`YYYY-MM-DD`); each game gets an **independent** stream `mulberry32(hash(dayKey) + idx*101)`. Content-seeding only (see the §3 `seed(rng)` note for exactly which calls). Same challenge for everyone, not same replay.
+- Daily numbering: `#N` where day 1 = `DAILY_EPOCH` **= 2026-07-16** (ship date, local time).
+- **Name**: shipped as **TUCK SHOP RUN** (`DAILY_NAME`, owner pick). Other 90s-NZ candidates kept in a menu-copy comment: PLAYLUNCH, THE TUCK RUN, MORNING TEA, AFTER THE BELL.
+- **One attempt = consumed at start** (owner choice): `beginDaily()` writes `{dayKey,played:true}` immediately, so bailing mid-run forfeits the day (locked re-entry shows the stored result, or COME BACK TOMORROW if forfeited).
+- **Share (both A and B)** — shipped:
+  - **B — emoji grid**: title, `#N`, one emoji tile per game by contribution tier (⬛ <100 / 🟨 100–199 / 🟧 200–349 / 🟩 350–499 / 🟪 500+), total, streak. `navigator.share({text})` → clipboard fallback with a COPIED! toast. (Emoji live in shared *text*, not canvas — rule 4 unaffected.)
+  - **A — share card**: a composed card (total, per-game bars + rank titles, date + `#N`, Centrapay mark crest) painted straight to the visible canvas (reuses the global-`ctx` helpers; chrome suppressed for a clean frame) → `c.toBlob()` → `navigator.share({files})`; fallback: the on-screen "SCREENSHOT ME" frame.
+- *Implemented by extending `GAUNTLET` with `daily=true` (see §3), plus a `sharecard` state. New keys `arc_daily_state`/`arc_daily_streak`/`arc_daily_lastdone` (§2).*
 
 ### Phase 5 — Mutators (opt-in, experimental)
 - **Free-play only, opt-in, never in the daily.** Gate the whole feature behind a single flag `const MUTATORS_ENABLED = true` so it can be switched off if playtesting kills it.
@@ -176,7 +180,7 @@ Seven games total during the trial period (all four existing + three new). None 
 | D1 | SWINGBALL is endless (loop-banking multiplier); it is a separate game from CHAIN, which remains in the roster. Fresh best key, no legacy inheritance. |
 | D2 | Seven-game trial roster; no pruning yet; gauntlet spans all games. Menu redesign accepted. |
 | D3 | Global par constants per game; par-based normalisation (÷par ×250, cap 625); no time caps anywhere; CHATTER par must be set from real play data, not rank tables. |
-| D4 | Daily = one gauntlet attempt per day; individual games unlimited. Content-seeding only. 90s-NZ name (working title PLAYLUNCH). |
+| D4 | Daily = one gauntlet attempt per day (consumed at start; bailing forfeits); individual games unlimited. Content-seeding only. Name settled: **TUCK SHOP RUN**. `DAILY_EPOCH = 2026-07-16`. |
 | D5 | Mutators are opt-in, free-play only, feature-flagged, separate best tables, fortune-teller UI. Excluded from the daily until playtesting says otherwise. |
 | D6 | Creature is growth-only, device-bound localStorage, cosmetic. |
 | D7 | Café hub metaphor is dead. Creature only. |
@@ -184,8 +188,8 @@ Seven games total during the trial period (all four existing + three new). None 
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
-- Final name for the daily (PLAYLUNCH working title).
-- Final pars for all seven games after ~a week of owner playtesting.
+- ~~Final name for the daily~~ — **resolved: TUCK SHOP RUN.**
+- Final pars for all seven games after ~a week of owner playtesting (all seven currently `// PROVISIONAL`: STACK 20, SCAN 35, CHAIN 50, SWINGBALL 40, CHATTER 600, SCRAMBLE 120, KNUCKLEBONES 90).
 - Which game(s) get pruned post-trial, and whether the roster returns to four.
 - SCRAMBLE/CHATTER attention-mechanic overlap: tolerated for the trial; revisit at prune time.
 
