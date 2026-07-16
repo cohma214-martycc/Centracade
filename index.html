@@ -18,8 +18,8 @@ canvas { display:block; cursor:pointer; }
 <script>
 'use strict';
 // ════════════════════════════════════════════════════════════════
-//  CENTRARCADE — six quick games, one thumb.
-//  STACK · SCAN · CHAIN · SWINGBALL · CHATTER · SCRAMBLE   (shared 16-bit engine)
+//  CENTRARCADE — seven quick games, one thumb.
+//  STACK · SCAN · CHAIN · SWINGBALL · CHATTER · SCRAMBLE · KNUCKLEBONES   (shared 16-bit engine)
 // ════════════════════════════════════════════════════════════════
 const c=document.getElementById('c');
 const ctx=c.getContext('2d');
@@ -1591,9 +1591,211 @@ const SCRAMBLE={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME 7: KNUCKLEBONES  (digitised jacks — catch the toss)
+//  Gold bones = CATCH (tap airborne); grey bones = SKIP (leave them).
+//  A missed catch OR a wrong tap = a drop; 3 drops = over. The traditional
+//  sequence is the level ladder; it loops endlessly, faster, after the top.
+//  Simple parabolic physics, no rotation sim — a horizontal frame-flip
+//  sells the spin (rule 4). Asphalt court is drawn; PALS[5] gives accents.
+// ════════════════════════════════════════════════════════════════
+const KNUCKLEBONES={
+  id:'bones', name:'KNUCKLEBONES', tag:'CATCH THE BONES',
+  bestKey:'arc_bones_best',
+  par:90, // PROVISIONAL — retune from play data (set after first playable)
+  LADDER:['ONESIES','TWOSIES','THREESIES','FOURSIES','CLICKS','HORSES IN THE STABLE','OVER THE FENCE'],
+  RUNGS:[{c:1,s:0,spd:1.00},{c:2,s:0,spd:1.05},{c:3,s:0,spd:1.10},{c:4,s:0,spd:1.18},{c:5,s:0,spd:1.28},{c:4,s:1,spd:1.34},{c:3,s:2,spd:1.45}],
+  ranks:[{s:0,t:'ONESIES'},{s:14,t:'TWOSIES'},{s:34,t:'THREESIES'},{s:58,t:'FOURSIES'},{s:86,t:'CLICKS'},{s:120,t:'HORSES IN THE STABLE'},{s:150,t:'OVER THE FENCE'}],
+  CATCH_LINE:480, SLOTS:[44,110,176,242,308],
+  BASE_LV:660, BASE_G:1000, TOSS_GAP:0.5, CLEARS_PER_RUNG:2, CATCH_R:34,
+  init(){
+    this.bones=[];
+    this.drops=0; this.score=0; this.catches=0;
+    this.rung=0; this.loop=0; this.tossClears=0;
+    this.baseSpd=1.0;
+    this.gapT=this.TOSS_GAP; this.tossActive=false; this.tossFault=false;
+    this.timeScale=1; this.shake=0; this.banner=null;
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[5]; }, // amber accents; the schoolyard court is drawn grey below
+  mult(){ return 1+this.loop; },
+  start(){ this.st='play'; this.gapT=0.5; },
+  rungCfg(){ return this.RUNGS[this.rung]; },
+  launchToss(){
+    const cfg=this.rungCfg(), total=cfg.c+cfg.s;
+    const spd=this.baseSpd*cfg.spd, lv=this.BASE_LV*spd, g=this.BASE_G*spd*spd;
+    const slots=this.SLOTS.slice();
+    for(let i=slots.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=slots[i]; slots[i]=slots[j]; slots[j]=t; }
+    const roles=[];
+    for(let i=0;i<cfg.c;i++) roles.push('catch');
+    for(let i=0;i<cfg.s;i++) roles.push('skip');
+    for(let i=roles.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=roles[i]; roles[i]=roles[j]; roles[j]=t; }
+    this.bones=[];
+    for(let i=0;i<total;i++){
+      this.bones.push({x:slots[i], y:this.CATCH_LINE, vy:-lv, vx:(Math.random()-0.5)*16, g,
+        kind:roles[i], caught:false, landed:false, delay:i*0.08, flip:false, seed:(Math.random()*6)|0});
+    }
+    this.tossActive=true; this.tossFault=false;
+    beep(700,0.05,'square',0.03);
+  },
+  drop(b,label){
+    this.tossFault=true; this.drops++;
+    burst(b.x,this.CATCH_LINE,'#ff4455',14,3.5);
+    pop(label,b.x,this.CATCH_LINE-24,'#ff6a8a',6);
+    sBad(); buzz(45); this.shake=Math.max(this.shake,5);
+    if(this.drops>=3) this.over();
+  },
+  onLand(b){
+    if(b.kind==='catch'&&!b.caught) this.drop(b,'DROP!');
+    else if(b.kind==='skip') sTick(0.02); // leaving a grey bone is correct
+  },
+  resolveToss(){
+    this.tossActive=false;
+    if(!this.tossFault){
+      this.score+=5*this.mult();
+      pop('+'+(5*this.mult()),W/2,300,'#ffd24a',6);
+      this.tossClears++;
+      if(this.tossClears>=this.CLEARS_PER_RUNG) this.rungUp();
+    }
+    const si=Math.floor(this.score);
+    if(si>this.best){ this.best=si; this.newBest=true; saveBest(this.bestKey,this.best); }
+    this.gapT=this.TOSS_GAP;
+  },
+  rungUp(){
+    this.tossClears=0;
+    if(this.rung>=this.LADDER.length-1){
+      this.loop++; this.rung=0; this.baseSpd*=1.12;
+      this.banner={t:'LOOP ×'+this.mult()+'!',life:1.6}; sGold();
+    } else {
+      this.rung++;
+      this.banner={t:this.LADDER[this.rung]+'!',life:1.5}; sStage();
+    }
+    this.timeScale=0.4; buzz(30); this.shake=5;
+    burst(W/2,300,this.pal().glow,20,4.5);
+  },
+  over(){
+    this.st='over'; this.overAt=performance.now(); this.tossActive=false;
+    sBad(); buzz(70); this.shake=10;
+  },
+  update(dt){
+    this.timeScale+=(1-this.timeScale)*0.055;
+    this.shake*=0.82;
+    if(this.st==='play'){
+      const ts=this.timeScale;
+      if(this.gapT>0){ this.gapT-=dt*ts; if(this.gapT<=0&&!this.tossActive) this.launchToss(); }
+      this.bones.forEach(b=>{
+        if(b.caught||b.landed) return;
+        if(b.delay>0){ b.delay-=dt*ts; return; }
+        b.vy+=b.g*dt*ts; b.y+=b.vy*dt*ts; b.x+=b.vx*dt*ts;
+        if((tick+b.seed)%6===0) b.flip=!b.flip; // spin frame-flip
+        if(b.vy>0&&b.y>=this.CATCH_LINE){ b.y=this.CATCH_LINE; b.landed=true; this.onLand(b); }
+      });
+      if(this.tossActive&&this.bones.length>0&&this.bones.every(b=>b.caught||b.landed)) this.resolveToss();
+    }
+    if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
+  },
+  drawCourt(){
+    const y=this.CATCH_LINE;
+    const g=ctx.createLinearGradient(0,y,0,H);
+    g.addColorStop(0,'#3a3a40'); g.addColorStop(1,'#242428');
+    ctx.fillStyle=g; ctx.fillRect(0,y,W,H-y);
+    ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(0,y,W,2);
+    ctx.fillStyle='rgba(255,255,255,0.05)';
+    for(let i=0;i<40;i++){ const rx=(i*97)%W, ry=y+8+((i*53)%(H-y-10)); ctx.fillRect(rx,ry,2,2); }
+    ctx.save(); ctx.setLineDash([8,7]); ctx.strokeStyle='rgba(240,236,224,0.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.restore();
+    ctx.strokeStyle='rgba(240,236,224,0.35)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(W/2,H-58,64,20,0,0,Math.PI*2); ctx.stroke();
+  },
+  drawShadow(b){
+    const h=Math.max(0,this.CATCH_LINE-b.y), s=Math.max(0.3,1-h/300);
+    ctx.save(); ctx.globalAlpha=0.25*s; ctx.fillStyle='#000';
+    ctx.beginPath(); ctx.ellipse(b.x,this.CATCH_LINE+8,11*s,4*s,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  },
+  drawBone(b){
+    const catchB=b.kind==='catch';
+    ctx.save(); ctx.translate(b.x,b.y); ctx.scale(b.flip?-1:1,1);
+    const col=catchB?'#f0e6d0':'#8f887c';
+    if(catchB){ ctx.shadowColor='#ffd24a'; ctx.shadowBlur=10; }
+    ctx.fillStyle='#140f0a'; rr(-9,-5,18,10,4); ctx.fill();
+    [[-8,-4],[-8,4],[8,-4],[8,4]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],3.4,0,Math.PI*2); ctx.fill(); });
+    ctx.shadowBlur=0;
+    ctx.fillStyle=col; rr(-7,-4,14,8,3); ctx.fill();
+    [[-8,-4],[-8,4],[8,-4],[8,4]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],2.6,0,Math.PI*2); ctx.fill(); });
+    ctx.fillStyle='rgba(255,255,255,0.28)'; rr(-6,-3,12,2.5,2); ctx.fill();
+    ctx.fillStyle=catchB?'#ffb020':'#5a564e'; ctx.fillRect(-1.5,-1.5,3,3);
+    ctx.restore();
+  },
+  drawRestingBones(){
+    const cy=H-58;
+    [[-40,2,0],[-14,-6,1],[12,4,2],[38,-2,3],[0,10,4]].forEach(o=>{
+      this.drawBone({x:W/2+o[0],y:cy+o[1],kind:o[2]<3?'catch':'skip',flip:(o[2]%2===0)});
+    });
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    this.drawCourt();
+    if(this.st==='ready') this.drawRestingBones();
+    else {
+      this.bones.forEach(b=>{ if(!b.caught) this.drawShadow(b); });
+      this.bones.forEach(b=>{ if(!b.caught) this.drawBone(b); });
+    }
+    drawFX();
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14; ctx.fillText(Math.floor(this.score),W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<(3-this.drops)?1:0.18;
+      ctx.translate(lx,110); ctx.fillStyle='#f0e6d0'; rr(-7,-3,14,6,3); ctx.fill();
+      [[-6,-3],[-6,3],[6,-3],[6,3]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],2.4,0,Math.PI*2); ctx.fill(); });
+      ctx.restore(); }
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=6;
+    ctx.fillText(this.LADDER[this.rung]+(this.loop>0?' ×'+this.mult():''),W/2,128); ctx.shadowBlur=0;
+    ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.fillText('CLEARS '+this.tossClears+'/'+this.CLEARS_PER_RUNG,W/2,140);
+    if(this.banner){
+      const b=this.banner, a2=Math.min(1,b.life*2), scale=1+(1-Math.min(1,b.life*1.6))*0.25;
+      ctx.save(); ctx.globalAlpha=a2; ctx.translate(W/2,168); ctx.scale(scale,scale);
+      ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,0,0);
+      ctx.restore();
+    }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'KNUCKLEBONES',['TAP THE GOLD BONES IN THE AIR','CATCH THEM BEFORE THEY LAND','GREY BONES: LEAVE THEM BE',"3 DROPS AND YOU'RE OUT"]);
+    if(this.st==='over') drawOverScreen(p,'BONES DROPPED',Math.floor(this.score),this.best,this.newBest,this.LADDER[this.rung]+(this.loop>0?' ×'+this.mult():''),'LOOP '+(this.loop+1)+' · '+this.catches+' CAUGHT');
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){
+      if(performance.now()-this.overAt>450){ this.init(); this.start(); }
+      return;
+    }
+    let best=null, bd=1e9;
+    this.bones.forEach(b=>{
+      if(b.caught||b.landed||b.delay>0) return;
+      const d=Math.hypot(x-b.x,y-b.y);
+      if(d<this.CATCH_R&&d<bd){ best=b; bd=d; }
+    });
+    if(!best) return; // an empty grab is a harmless no-op
+    if(best.kind==='catch'){
+      best.caught=true; this.catches++; this.score+=2*this.mult();
+      const si=Math.floor(this.score); if(si>this.best){ this.best=si; this.newBest=true; saveBest(this.bestKey,this.best); }
+      burst(best.x,best.y,'#ffd24a',8,2.6); pop('CLICK',best.x,best.y-18,'#ffd24a',6); sHit(); buzz(10);
+    } else {
+      best.landed=true; this.drop(best,'FAULT!'); // tapping a grey bone is a fault
+    }
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE]; // gauntlet order (roadmap §3)
+const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // gauntlet order (roadmap §3)
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -1639,7 +1841,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -1688,6 +1890,17 @@ function drawMenuIcon(g,cx,cy){
     rr(-10,5,20,6,6); ctx.fillStyle='#3a2410'; ctx.fill();
     ctx.fillStyle='#111'; ctx.fillRect(-5,12,3,3); ctx.fillRect(3,12,3,3);
     ctx.strokeStyle='#7a1020'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(0,16,3,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
+  } else if(g.id==='bones'){
+    // a little pile of knucklebones, one gold one tossed above
+    [[-12,9,0.3,'#f0e6d0'],[11,11,-0.4,'#f0e6d0'],[-1,0,0.12,'#f0e6d0'],[1,-17,0,'#ffd24a']].forEach(bn=>{
+      ctx.save(); ctx.translate(bn[0],bn[1]); ctx.rotate(bn[2]);
+      if(bn[3]==='#ffd24a'){ ctx.shadowColor='#ffd24a'; ctx.shadowBlur=8; }
+      ctx.fillStyle='#140f0a'; rr(-9,-5,18,10,4); ctx.fill();
+      [[-8,-4],[-8,4],[8,-4],[8,4]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],3.2,0,Math.PI*2); ctx.fill(); });
+      ctx.shadowBlur=0; ctx.fillStyle=bn[3]; rr(-7,-4,14,8,3); ctx.fill();
+      [[-8,-4],[-8,4],[8,-4],[8,4]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],2.4,0,Math.PI*2); ctx.fill(); });
+      ctx.restore();
+    });
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
@@ -1718,10 +1931,10 @@ function drawMenu(){
   ctx.fillText('CENTRARCADE',W/2,138);
   ctx.shadowBlur=0;
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-  ctx.fillText('SIX QUICK GAMES \u00b7 ONE THUMB',W/2,158);
+  ctx.fillText('SEVEN QUICK GAMES \u00b7 ONE THUMB',W/2,158);
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4]}[g.id];
+    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
