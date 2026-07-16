@@ -73,15 +73,16 @@ spaceTap  optional bool; when true the spacebar routes to tap() (positionless ga
 State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.now() - overAt > 450`.
 
 **Contract extensions required by the roadmap** (add to all games):
-- `par` — number, global par score for gauntlet normalisation (see §5). *So far on SWINGBALL (40), SCRAMBLE (120) and KNUCKLEBONES (90), all provisional; still to add to STACK/SCAN/CHAIN/CHATTER before Phase 3.*
+- `par` — number, global par score for gauntlet normalisation (see §5). *Now on all seven games, all provisional: STACK 20, SCAN 35, CHAIN 50, SWINGBALL 40, CHATTER 600 (owner median — CHATTER plays far harder than its ranks), SCRAMBLE 120, KNUCKLEBONES 90.*
 - `seed(rng)` — optional; accept a seeded PRNG for daily runs. Content-seeding only: spawn order, zone placements, disc timings. Physics stays live.
-- `onOver` — optional callback the gauntlet controller sets to hook game-over.
+- `onOver` — optional callback the gauntlet controller sets to hook game-over. *Wired: each game calls `if(this.onOver) this.onOver()` at its over-transition; the controller registers it, clears it one-shot (double-fire safe), and free-play resets it to null.*
 
 ### Router
-- `mode`: `'menu' | 'game' | 'gauntlet'` (gauntlet still pending); `cur` = active game.
+- `mode`: `'menu' | 'game' | 'gauntlet'`; `cur` = active game (in gauntlet, the current game the controller is running).
 - Menu tap → `cur=g; cur.init(); mode='game'`. Home → discard state, back to menu. Global `tick` drives all pulse/shimmer phases. Frame loop clamps dt to 0.05.
-- **Menu is a paginated 2×2 card list** (`PER_PAGE=4`, `menuPage`, `menuCards()`, `menuNav()`, drawn dots + arrows via `drawArrow()`). Card selection resolves on `pointerup` so a horizontal drag reads as a page swipe; **game taps still fire on `pointerdown`** for zero latency. Swipe, tappable dots/arrows, and ←/→ arrow keys all page.
-- **`paused`** (module-level): set on `visibilitychange` while a game is mid-play; the loop then skips `update`, keeps rendering the frozen frame, and draws `drawPauseOverlay()`. A tap or space resumes; home/mute stay live.
+- **Menu is a paginated 2×2 card list** over `MENU_ITEMS` = `[GAUNTLET, ...GAMES]` (`PER_PAGE=4`, `menuPage`, `menuCards()`, `menuNav()`, drawn dots + arrows via `drawArrow()`). The GAUNTLET card is the **first tile** (eight cards → two pages). Card selection resolves on `pointerup` so a horizontal drag reads as a page swipe; **game taps still fire on `pointerdown`** for zero latency. Swipe, tappable dots/arrows, and ←/→ arrow keys all page.
+- **`paused`** (module-level): set on `visibilitychange` while a game is mid-play (in `game` **or** `gauntlet` mode); the loop then skips `update`, keeps rendering the frozen frame, and draws `drawPauseOverlay()`. A tap or space resumes; home/mute stay live.
+- **`GAUNTLET`** (Phase 3 controller, outside the game contract): `mode='gauntlet'` sequences all games in `GAMES` order to first game-over each via each game's `onOver` hook, normalises (`round(score/par × 250)`, cap 625) into a running `total`, and renders interstitials + an end card writing `arc_gauntlet_best`. Reads only public fields (`score`/`par`/`ranks`/`name`); never mutates game internals. Free-play resets `cur.onOver=null` on selection, so the hook is a no-op outside the gauntlet. See §5 Phase 3.
 - **Bests cached** on menu entry via `refreshMenuBests()` → `menuBests` (not `loadBest` per card per frame); refreshed on home-exit so a new best set mid-game shows.
 - **`sc` is recomputed by `resize()`** on `resize`/`orientationchange` only — backing store stays `W*dpr`, the single `setTransform` is never touched per frame (rule 2).
 - **Frame loop starts only after the font is ready**: `document.fonts.load('8px "Press Start 2P"')` raced with a 1.5s timeout fallback, to kill the FOUT.
@@ -136,12 +137,13 @@ Seven games total during the trial period (all four existing + three new). None 
 - Bone-coloured sprites on a schoolyard-asphalt palette; keep physics simple (parabolic, no rotation sim needed — a spin frame-flip sells it).
 - *Shipped v1: gold bones = catch (tap airborne), grey = skip decoys (leave them, tapping one faults); missed catch OR grey-bone tap = a drop, 3 drops = over. Ladder rungs set catch/skip counts + speed (decoys from HORSES on); 2 clean tosses advance a rung, then loops faster. Frame-flip spin, drawn asphalt court, PALS[5] accents. **Palette note:** no grey palette exists and adding a 7th `PALS` entry would shift CHAIN/CHATTER's `stage % PALS.length` cycling, so the asphalt court is drawn directly and PALS[5] supplies accents.*
 
-### Phase 3 — GAUNTLET (free play)
-- Fifth-slot menu card: **GAUNTLET — EVERY GAME, ONE SCORE**. Plays ALL roster games in fixed order (STACK → SCAN → CHAIN → SWINGBALL → CHATTER → SCRAMBLE → BONES), each to first game-over.
+### Phase 3 — GAUNTLET (free play) ✅ COMPLETE
+- Menu card **GAUNTLET — EVERY GAME · ONE SCORE**, shipped as the **first tile** (owner request; `MENU_ITEMS = [GAUNTLET, ...GAMES]`). Plays ALL roster games in fixed order (STACK → SCAN → CHAIN → SWINGBALL → CHATTER → SCRAMBLE → BONES), each to first game-over.
 - **Par normalisation**: contribution = `round(score / game.par × 250)`, capped at `625` (2.5× par). No time caps on any game, including CHATTER.
-- Pars are **global constants** on each game object, tuned from real play data. Ship provisional pars clearly marked `// PROVISIONAL — retune from play data`: STACK 20, SCAN 35, CHAIN 50, SWINGBALL 40, CHATTER **?** (owner reports CHATTER is significantly harder than rank tables imply — set the provisional par from owner's actual median, not from the rank ladder), SCRAMBLE/BONES set after first playable.
-- Between games: interstitial showing running total + per-game contribution bars. End: total, per-game bars with rank titles, `arc_gauntlet_best`.
-- Implement as a `GAUNTLET` controller object outside the game contract — it sequences `cur`, hooks `onOver`, accumulates, renders interstitials. Do not modify game internals for it.
+- Pars are **global constants** on each game object, all shipped provisional (`// PROVISIONAL`): STACK 20, SCAN 35, CHAIN 50, SWINGBALL 40, **CHATTER 600** (owner median, not the rank ladder — CHATTER plays far harder than its ranks imply), SCRAMBLE 120, BONES 90. All still to be retuned from real play data.
+- Between games: interstitial showing running total + per-game contribution bars (`drawInterstitial`). End: total, per-game bars with rank titles, `arc_gauntlet_best` (`drawEnd`).
+- Implemented as a `GAUNTLET` controller object outside the game contract (see §3) — it sequences `cur`, hooks `onOver`, accumulates, renders interstitials. Game internals untouched.
+- *Shipped: `mode='gauntlet'` wired into the frame loop, input (home exits via `GAUNTLET.exit()`, taps forward to the controller), Space, and the `visibilitychange` pause. New key `arc_gauntlet_best` (already in §2). Drawn gold card + "seven palette chips under one gold mark" icon.*
 
 ### Phase 4 — THE DAILY (one attempt, shareable)
 - A daily seeded gauntlet, **one attempt per calendar day** (local time), enforced via `arc_daily_state`. Individual games remain unlimited free-play. Streak counter in `arc_daily_state`/`arc_daily_streak`.
