@@ -61,6 +61,13 @@ const PALS=[
  {top:'#071c10',bot:'#0c2c1a',ring:'#5fe89a',acc:'#2aa860',glow:'#44e088',sky:'#123a22'},
  {top:'#1e0810',bot:'#300c1a',ring:'#ff6a8a',acc:'#cc2244',glow:'#ff4466',sky:'#421426'},
  {top:'#1e1406',bot:'#302008',ring:'#ffd85a',acc:'#d69028',glow:'#ffcc44',sky:'#42300c'},
+ // Phase 5 (§3): one palette per new game. Unreferenced until each game lands
+ // (no PALMAP entry yet). CHATTER now cycles an explicit list, so appending here
+ // can't recolour it. Hues are tentative — retune when the owning game is built.
+ {top:'#0a1c06',bot:'#122c08',ring:'#8aff2a',acc:'#5ac014',glow:'#a6ff44',sky:'#184008'}, // 6 GUNGE — slime lime (distinct from PALS[3] backyard green)
+ {top:'#0a0f24',bot:'#121a3a',ring:'#5a7cff',acc:'#3048c8',glow:'#6a8cff',sky:'#141e4a'}, // 7 TAZO — electric holo blue (hue unspecified in spec)
+ {top:'#1c0e04',bot:'#2c1808',ring:'#ffab4e',acc:'#d6841e',glow:'#ff9a30',sky:'#3a220c'}, // 8 DAIRY — warm caramel pie-warmer
+ {top:'#040e1c',bot:'#08182e',ring:'#ff5a6a',acc:'#c02840',glow:'#ff4458',sky:'#0a2038'}, // 9 WEAVER — navy hull + red-sock accent
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -656,6 +663,10 @@ const CHATTER={
   CX:W/2, CY:288, RING_R:100, MAX_DISCS:5,
   HIT_R:34,
   DECAY_BASE:4.0, DECAY_GROWTH:2.1, STAGE_INTERVAL:14,
+  // Stage palette cycle as an EXPLICIT index list, not (2+stage)%PALS.length —
+  // so appending PALS entries (Phase 5) can't silently recolour CHATTER's stages.
+  // This list reproduces the old modulo sequence byte-for-byte (2,3,4,5,0,1,…).
+  CHATTER_PALS:[2,3,4,5,0,1],
   init(){
     // 5 fixed slots around the ring; none sit at the very top (brand tag lives there).
     this.slots=[];
@@ -674,7 +685,7 @@ const CHATTER={
     this.newBest=false; this.st='ready'; this.overAt=0;
     parts=[]; pops=[];
   },
-  pal(){ return PALS[(2+this.stage)%PALS.length]; },
+  pal(){ return PALS[this.CHATTER_PALS[this.stage%this.CHATTER_PALS.length]]; },
   start(){ this.st='play'; },
   slotPos(s){
     return {x:this.CX+Math.cos(s.angle)*this.RING_R, y:this.CY+Math.sin(s.angle)*this.RING_R};
@@ -2084,30 +2095,57 @@ function getXY(e){
 // Game input fires immediately on pointerdown (zero latency for rhythm taps).
 // Menu selection resolves on pointerup so a horizontal drag reads as a page swipe.
 let menuDrag=null;
+// Optional pointer-stream contract (§3, D12). A game opts in by defining press();
+// then the router forwards press/drag/release and does NOT call tap() during play.
+// Games without press() are untouched — tap() on pointerdown, exactly as before.
+// gameGesture holds the live gesture: {x,y} = last coords, live = in-play (press
+// fired) vs a ready/over interaction that resolves through tap() on release.
+// Kept strictly separate from menuDrag (menu and game modes never coexist).
+let gameGesture=null;
+function gameDown(x,y){
+  if(cur.press){
+    if(cur.st==='play'){ cur.press(x,y); gameGesture={x,y,live:true}; }
+    else gameGesture={x,y,live:false}; // ready-start / over-restart → tap() on release
+  } else {
+    cur.tap(x,y); // no stream declared: unchanged tap-on-pointerdown
+  }
+}
 function onDown(e){
   e.preventDefault();
   audio();
   const {x,y}=getXY(e);
   if(inR(x,y,muteRect())){ mute=!mute; try{ localStorage.setItem('arc_mute',mute?'1':'0'); }catch(err){} return; }
   if(mode==='game'){
-    if(inR(x,y,homeRect())){ mode='menu'; cur.init(); cur=null; paused=false; refreshMenuBests(); refreshDaily(); return; }
+    if(inR(x,y,homeRect())){ mode='menu'; cur.init(); cur=null; paused=false; gameGesture=null; refreshMenuBests(); refreshDaily(); return; }
     if(paused){ paused=false; return; } // consume the resume tap
-    cur.tap(x,y);
+    gameDown(x,y);
     return;
   }
   if(mode==='gauntlet'){
-    if(inR(x,y,homeRect())){ GAUNTLET.exit(); return; }
+    if(inR(x,y,homeRect())){ GAUNTLET.exit(); gameGesture=null; return; }
     if(paused){ paused=false; return; }
-    GAUNTLET.tap(x,y);
+    if(GAUNTLET.state==='playing'&&cur){ gameDown(x,y); return; } // stream/tap the running game
+    GAUNTLET.tap(x,y); // interstitial / end / sharecard chrome
     return;
   }
   menuDrag={x0:x,y0:y,moved:false}; // menu: defer to pointerup
 }
 function onMove(e){
+  if(gameGesture){ // a game pointer-stream gesture owns the pointer
+    if(gameGesture.live){ const {x,y}=getXY(e); if(cur&&cur.drag) cur.drag(x,y); gameGesture.x=x; gameGesture.y=y; }
+    return;
+  }
   if(!menuDrag||mode!=='menu') return;
   if(Math.abs(getXY(e).x-menuDrag.x0)>8) menuDrag.moved=true;
 }
 function onUp(e){
+  if(gameGesture){
+    const {x,y}=getXY(e);
+    if(gameGesture.live){ if(cur&&cur.release) cur.release(x,y); } // gesture end
+    else if(cur) cur.tap(x,y); // ready-start / over-restart (shared debounce + screens)
+    gameGesture=null;
+    return;
+  }
   if(mode!=='menu'||!menuDrag){ menuDrag=null; return; }
   const {x,y}=getXY(e), dx=x-menuDrag.x0, moved=menuDrag.moved, n=menuPageCount();
   menuDrag=null;
@@ -2130,7 +2168,14 @@ function onUp(e){
 c.addEventListener('pointerdown',onDown);
 c.addEventListener('pointermove',onMove);
 c.addEventListener('pointerup',onUp);
-c.addEventListener('pointercancel',()=>{ menuDrag=null; });
+c.addEventListener('pointercancel',()=>{
+  if(gameGesture){ // iOS fires this on interruption — terminate the gesture cleanly (§3)
+    if(gameGesture.live&&cur&&cur.release) cur.release(gameGesture.x,gameGesture.y);
+    gameGesture=null;
+    return;
+  }
+  menuDrag=null;
+});
 window.addEventListener('keydown',e=>{
   if(e.code==='Space'){
     e.preventDefault();

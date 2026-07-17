@@ -99,7 +99,9 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 - **`seed(rng)`** — **content-seeding only**: spawn order, zone placements, toss shuffles, grid generation. Physics and cosmetics stay live. Currently routed through `srnd`: SCAN spawn side/type/y, SWINGBALL zone, SCRAMBLE kid mix, BONES toss shuffles. STACK/CHATTER are already deterministic. `srng=null` ⇒ free play stays byte-identical; cleared at every non-daily entry.
 - **`onOver`** — each game calls `if(this.onOver) this.onOver()` at its over-transition; the controller registers it and clears it one-shot (double-fire safe); free play resets it to null.
 
-#### Contract extension — pointer stream (Phase 5, required)
+#### Contract extension — pointer stream (Phase 5) ✅ WIRED (Unit 2)
+
+The router implements the stream below (`gameGesture` + `gameDown()` in the Input section). No Phase 5 game consumes it yet — every current game lacks `press`, so all six stay on tap-on-pointerdown, unchanged. It is forwarded in **both** `mode==='game'` and the gauntlet-playing path (Phase 5 games join the daily), so a `press`-game works in the daily too.
 
 Four of the five Phase 5 games need more than a tap. Add **one** optional extension rather than five bespoke input hacks:
 
@@ -132,11 +134,11 @@ The existing `menuDrag` logic already proves the pattern: menu resolves on `poin
 
 ### Palettes and roster growth (read before Phase 5)
 
-Six palettes, soon eleven games. Current assignment (`PALMAP` + the menu-icon/card lookups): STACK `0`, SCAN `1`, SWINGBALL `3`, CHATTER `3` (cycles `(2+stage)%PALS.length`), SCRAMBLE `4`, BONES `5`. **PALS[2] (purple) is freed by CHAIN's removal and becomes the hub palette** — menu, interstitials, end card, pause.
+**Ten palettes** (six original + four Phase-5), eleven games soon. Current assignment (`PALMAP` + the menu-icon/card lookups): STACK `0`, SCAN `1`, SWINGBALL `3`, CHATTER `3` (menu) cycling `CHATTER_PALS=[2,3,4,5,0,1]` in-play, SCRAMBLE `4`, BONES `5`. **PALS[2] (purple) is freed by CHAIN's removal and becomes the hub palette** — menu, interstitials, end card, pause.
 
-With CHAIN gone, **CHATTER is the only palette-cycling game**, so growing `PALS` is now much safer than it was when KNUCKLEBONES was built (that's why the asphalt court was drawn directly instead of adding a 7th entry). Before adding palettes, make CHATTER cycle an **explicit index list** (e.g. `CHATTER_PALS=[3,4,5,0,1,2]`) instead of `% PALS.length`. Then `PALS` can grow without silently rewriting CHATTER's stage colours.
+With CHAIN gone, **CHATTER is the only palette-cycling game**. Its stage cycle is now an **explicit index list** (`CHATTER_PALS`, Unit 2) instead of `(2+stage)%PALS.length` — the list reproduces the old sequence byte-for-byte (`2,3,4,5,0,1,…`) but is decoupled from `PALS.length`, so appending palettes can no longer silently recolour CHATTER's stages. (Note: the shipped list preserves current colours; it is **not** the illustrative `[3,4,5,0,1,2]` that once appeared here, which would have recoloured stage 0.)
 
-Phase 5 palette intent (see each game below): HOWLER `0`, GUNGE new green-slime entry, TAZO new entry, DAIRY new warm entry, WEAVER new navy entry. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
+Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWLER reuses `0`; **`6` GUNGE** slime lime, **`7` TAZO** electric holo blue, **`8` DAIRY** warm caramel, **`9` WEAVER** navy + red-sock. All four hues are **tentative** — retune when the owning game is built. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
 
 ---
 
@@ -184,7 +186,7 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 - **`CHAIN` object removed**; `chain` dropped from `GAMES`, `PALMAP`, both `drawMenuIcon`/card palette lookups, and its `drawMenuIcon` branch deleted. `refreshMenuBests` no longer special-cases `chain` (only STACK's `cps2_best` legacy remains).
 - **`arc_chain_best` and `chain_best` retained, dormant** (rule 10, §2) — unread, never deleted, present nowhere in `index.html`. SWINGBALL keeps its fresh `arc_swing_best` with no inheritance (D1).
 - **SWINGBALL now owns the `wasInside`/sign-crossing overshoot core** as the reference implementation; its comments say so and the "ported verbatim from CHAIN" note is gone. **Logic untouched** — only comments changed.
-- **PALS[2] is the hub palette** — unmapped by any game, still driving the menu title glow, interstitials, end card, and pause overlay.
+- **PALS[2] is the hub palette** — menu title glow, interstitials, end card, pause. It is unmapped in **`PALMAP`** (no game's menu/card lookup points at it; CHATTER's card is `3`), but **not** unmapped in play: CHATTER's stage cycle opens on it (see §7). "Freed by CHAIN's prune" means freed from `PALMAP`, not from every code path.
 - **Menu subtitle derives from `GAMES.length`** → renders `6 QUICK GAMES · ONE THUMB` (digit, not a spelled word — owner-chosen). Can't drift again.
 - Roster: STACK → SCAN → SWINGBALL → CHATTER → SCRAMBLE → KNUCKLEBONES (6). Daily is 6 games until the new ones land, then 11.
 - **Beyond spec**: the source-file `GAME N` section labels were resequenced 1–6 to close the gap CHAIN left (comment-only). They track *file order*, not the `GAMES`/daily sequence — see §7.
@@ -313,7 +315,8 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 - **HOWLER's whistle window** — the spec's 1.5–1.8 px/ms is not calibrated for 360×640. Must be measured on-device, not guessed.
 - **Which games get pruned next**, and the target roster size. CHAIN was first (D10).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
-- **New `PALS` entries for Phase 5** — requires the CHATTER explicit-cycle fix first (§3). Alternative is drawing surfaces directly (asphalt-court precedent).
+- **New `PALS` entries for Phase 5** — ✅ added (Unit 2), after the CHATTER explicit-cycle fix that made growth safe. Four entries (`6` GUNGE, `7` TAZO, `8` DAIRY, `9` WEAVER); **their exact hues remain open** — provisional, retune per game. Drawing surfaces directly (asphalt-court precedent) is still available where a palette isn't warranted.
+- **CHATTER's in-play stage-0 colour is the "hub" PALS[2], and differs from its menu card** — surfaced when Unit 2 replaced `(2+stage)%PALS.length` with the explicit `CHATTER_PALS=[2,3,4,5,0,1]`. The list opens on `2`, so CHATTER's stage-0 (and every 6th stage) background/ring is the hub purple, while its **menu card** uses `PALMAP.chatter=3` (green). Both facts are **pre-existing** — the old modulo did exactly the same; the explicit list only made them visible, and Unit 2 preserved the sequence byte-for-byte. Open question: is CHATTER sharing the hub purple at stage 0 (and the card-vs-play colour mismatch) intended? If not, drop `2` from `CHATTER_PALS` — a deliberate, isolated one-line recolour, no longer a side effect of `PALS.length`.
 - **Source `GAME N` section labels track file order, not roster order** (surfaced during the 5.0 prune). They were renumbered 1–6 after CHAIN's removal, but the file lays CHATTER's block *before* SWINGBALL's while `GAMES` runs SWINGBALL *before* CHATTER — so "GAME 3: CHATTER" is actually the 4th game in the daily sequence. This mismatch predates the prune (it was CHAIN-shaped before). Harmless — they're only comments — but do not read them as roster/daily indices. Decide whether to reorder the source blocks to match `GAMES`, or drop the numbers entirely, when the five new games land.
 
 ## 8. Style conventions
