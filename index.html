@@ -25,8 +25,8 @@ canvas { display:block; cursor:pointer; touch-action:none; }
 <script>
 'use strict';
 // ════════════════════════════════════════════════════════════════
-//  CENTRARCADE — seven quick games + the TUCK SHOP RUN daily, one thumb.
-//  STACK · SCAN · CHAIN · SWINGBALL · CHATTER · SCRAMBLE · KNUCKLEBONES   (shared 16-bit engine)
+//  CENTRARCADE — six quick games + the TUCK SHOP RUN daily, one thumb.
+//  STACK · SCAN · SWINGBALL · CHATTER · SCRAMBLE · KNUCKLEBONES   (shared 16-bit engine)
 // ════════════════════════════════════════════════════════════════
 const c=document.getElementById('c');
 const ctx=c.getContext('2d');
@@ -646,223 +646,7 @@ const SCAN={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 3: CHAIN  (ported from the standalone)
-// ════════════════════════════════════════════════════════════════
-const CHAIN={
-  id:'chain', name:'CHAIN', tag:'LINK THE CHIP',
-  spaceTap:true, // positionless — safe to trigger from the spacebar
-  bestKey:'arc_chain_best',
-  par:50, // PROVISIONAL — retune from play data
-  ranks:[{s:0,t:'COIN COUNTER'},{s:10,t:'TAP TRAINEE'},{s:25,t:'LINK APPRENTICE'},{s:50,t:'CHAIN CRAFTER'},{s:75,t:'SETTLEMENT PRO'},{s:100,t:'LEDGER LEGEND'},{s:150,t:'CENTRAPAY CHAMPION'},{s:220,t:'MYTHIC LINKER'}],
-  CX:W/2, CY:300, R:116,
-  START_SPEED:1.7, SPEED_INC:0.05, SPEED_CAP:4.2,
-  START_ZONE:0.42, ZONE_SHRINK:0.012, ZONE_FLOOR:0.14, ZONE_RECOVER:0.07,
-  STAGE_LEN:10, PERFECT_FRAC:0.33,
-  init(){
-    this.angle=-Math.PI/2; this.dir=1; this.speed=this.START_SPEED;
-    this.zoneC=wrap(this.angle+2.2); this.zoneHalf=this.START_ZONE;
-    this.wasInside=false; this.zoneGold=false; this.nextGold=false;
-    this.score=0; this.stage=0; this.stageLink=0;
-    this.timeScale=1; this.shake=0; this.grace=0;
-    this.best=loadBest(this.bestKey,'chain_best');
-    this.newBest=false; this.trail=[]; this.ghosts=[]; this.banner=null;
-    this.st='ready'; this.overAt=0;
-    parts=[]; pops=[];
-  },
-  pal(){ return PALS[this.stage%PALS.length]; },
-  start(){ this.st='play'; },
-  chipPos(a){ return {x:this.CX+Math.cos(a)*this.R, y:this.CY+Math.sin(a)*this.R}; },
-  placeZone(){
-    this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
-    this.wasInside=false;
-    this.zoneGold=this.nextGold; this.nextGold=false;
-  },
-  success(d){
-    const perfect=Math.abs(d)<=this.zoneHalf*this.PERFECT_FRAC;
-    const gain=this.zoneGold?3:(perfect?2:1);
-    this.score+=gain;
-    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); }
-    this.stageLink++;
-    const pos=this.chipPos(this.angle);
-    this.ghosts.push({a:this.zoneC,life:1,c:this.zoneGold?'#ffd24a':(perfect?'#ffffff':this.pal().glow)});
-    if(this.zoneGold){ burst(pos.x,pos.y,'#ffd24a',16,4); pop('+3 GOLD!',pos.x,pos.y-26,'#ffd24a',8); sGold(); buzz(20); }
-    else if(perfect){ burst(pos.x,pos.y,'#ffffff',12,3.6); pop('PERFECT +2',pos.x,pos.y-26,'#ffffff',7); sPerfect(); buzz(18); }
-    else { burst(pos.x,pos.y,this.pal().glow,9,2.8); pop('+1',pos.x,pos.y-24,this.pal().ring,7); sHit(); buzz(12); }
-    this.speed=Math.min(this.SPEED_CAP,this.speed+this.SPEED_INC);
-    this.zoneHalf=Math.max(this.ZONE_FLOOR,this.zoneHalf-this.ZONE_SHRINK);
-    if(this.stageLink>=this.STAGE_LEN){
-      this.stage++; this.stageLink=0;
-      this.zoneHalf=Math.min(this.START_ZONE,this.zoneHalf+this.ZONE_RECOVER);
-      this.speed=Math.max(this.START_SPEED,this.speed-0.28);
-      this.timeScale=0.35; this.nextGold=true; this.grace=0.3; // input forgiveness through the slow-mo
-      this.banner={t:'STAGE '+(this.stage+1)+'!',life:1.4};
-      burst(this.CX,this.CY,this.pal().glow,22,5);
-      sStage(); buzz(30); this.shake=6;
-    }
-    this.dir*=-1;
-    this.placeZone();
-  },
-  breakChain(){
-    if(this.grace>0) return; // stage-up grace period: no breaks
-    const pos=this.chipPos(this.angle);
-    burst(pos.x,pos.y,'#ff4455',22,5); burst(pos.x,pos.y,'#fff',8,3);
-    this.shake=10; sBad(); buzz(70);
-    this.overAt=performance.now(); this.st='over';
-    if(this.onOver) this.onOver();
-  },
-  update(dt){
-    this.timeScale+=(1-this.timeScale)*0.055;
-    this.shake*=0.82;
-    if(this.grace>0) this.grace-=dt;
-    if(this.st==='play'){
-      const prevD=wrap(this.angle-this.zoneC);
-      this.angle=wrap(this.angle+this.dir*this.speed*dt*this.timeScale);
-      const d=wrap(this.angle-this.zoneC);
-      const inside=Math.abs(d)<=this.zoneHalf;
-      if(inside){ this.wasInside=true; }
-      else if(this.wasInside){
-        if(Math.sign(d)===Math.sign(this.dir)) this.breakChain();
-        this.wasInside=false;
-      } else {
-        if(Math.sign(prevD)!==Math.sign(d)&&Math.abs(prevD)>this.zoneHalf&&Math.abs(d)>this.zoneHalf&&Math.abs(prevD-d)<Math.PI) this.breakChain();
-      }
-    } else if(this.st==='ready'){
-      this.angle=wrap(this.angle+this.dir*0.9*dt);
-    }
-    this.ghosts.forEach(g2=>g2.life-=0.03); this.ghosts=this.ghosts.filter(g2=>g2.life>0);
-    if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
-  },
-  render(){
-    const p=this.pal();
-    ctx.save();
-    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
-    drawBG(p);
-    // ring
-    ctx.save();
-    ctx.strokeStyle=p.ring; ctx.globalAlpha=0.14; ctx.lineWidth=14;
-    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=5;
-    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke();
-    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=2;
-    for(let i=0;i<24;i++){
-      const a=i*Math.PI/12;
-      ctx.beginPath();
-      ctx.moveTo(this.CX+Math.cos(a)*(this.R-7),this.CY+Math.sin(a)*(this.R-7));
-      ctx.lineTo(this.CX+Math.cos(a)*(this.R+7),this.CY+Math.sin(a)*(this.R+7));
-      ctx.stroke();
-    }
-    // zone
-    if(this.st==='play'){
-      const col=this.zoneGold?'#ffd24a':p.glow;
-      const pulse=0.75+0.25*Math.sin(tick*0.18);
-      ctx.save(); ctx.lineCap='round';
-      ctx.strokeStyle=col; ctx.shadowColor=col; ctx.shadowBlur=18*pulse;
-      ctx.lineWidth=13; ctx.globalAlpha=0.92;
-      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
-      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
-      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
-      ctx.restore();
-      if(this.zoneGold){
-        ctx.save(); ctx.textAlign='center';
-        ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
-        ctx.shadowColor='#ffaa00'; ctx.shadowBlur=8;
-        const tx=this.CX+Math.cos(this.zoneC)*(this.R+26), ty2=this.CY+Math.sin(this.zoneC)*(this.R+26);
-        ctx.fillText('+3',tx,ty2+3);
-        ctx.restore();
-      }
-    }
-    // trail + ghosts + chip
-    const pos=this.chipPos(this.angle);
-    this.trail.push({x:pos.x,y:pos.y}); if(this.trail.length>12) this.trail.shift();
-    this.trail.forEach((t2,i)=>{
-      const f=i/this.trail.length;
-      ctx.globalAlpha=f*0.35; ctx.fillStyle=p.glow;
-      const s2=5+f*7;
-      rr(t2.x-s2/2,t2.y-s2/2,s2,s2,3); ctx.fill();
-    });
-    ctx.globalAlpha=1;
-    this.ghosts.forEach(g2=>{
-      ctx.globalAlpha=g2.life*0.5;
-      const gp=this.chipPos(g2.a);
-      ctx.strokeStyle=g2.c; ctx.lineWidth=2;
-      rr(gp.x-13,gp.y-13,26,26,7); ctx.stroke();
-    });
-    ctx.globalAlpha=1;
-    ctx.save(); ctx.translate(pos.x,pos.y);
-    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    rr(-14,-14,28,28,8); ctx.fillStyle='#e85d15'; ctx.fill();
-    ctx.shadowBlur=0;
-    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
-    rr(-14,-14,28,28,8); ctx.stroke();
-    drawMark(0,0,20,'#f5ece0');
-    ctx.restore();
-    // anchor
-    const pulse2=1+0.04*Math.sin(tick*0.06*this.speed);
-    ctx.save(); ctx.translate(this.CX,this.CY); ctx.scale(pulse2,pulse2);
-    ctx.shadowColor=p.acc; ctx.shadowBlur=22;
-    rr(-30,-30,60,60,14); ctx.fillStyle='#10090f'; ctx.fill();
-    ctx.shadowBlur=0;
-    ctx.strokeStyle=p.ring+'aa'; ctx.lineWidth=2;
-    rr(-30,-30,60,60,14); ctx.stroke();
-    drawMark(0,2,44,p.ring);
-    ctx.restore();
-    drawFX();
-    if(this.banner){
-      const b=this.banner;
-      const a2=Math.min(1,b.life*2);
-      const scale=1+(1-Math.min(1,b.life*1.6))*0.25;
-      ctx.save(); ctx.globalAlpha=a2;
-      ctx.translate(this.CX,this.CY-this.R-42); ctx.scale(scale,scale);
-      ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
-      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16;
-      ctx.fillText(b.t,0,0);
-      ctx.restore();
-    }
-    // HUD
-    ctx.textAlign='center';
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff';
-    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.fillText(this.score,W/2,76);
-    ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-    ctx.fillText('BEST '+this.best,W/2,96);
-    const pipW=12, x0=W/2-(this.STAGE_LEN*pipW)/2+pipW/2;
-    for(let i=0;i<this.STAGE_LEN;i++){
-      const filled=i<this.stageLink;
-      ctx.fillStyle=filled?p.glow:'rgba(255,255,255,0.15)';
-      if(filled){ ctx.shadowColor=p.glow; ctx.shadowBlur=6; }
-      rr(x0+i*pipW-3.5,108,7,7,2); ctx.fill();
-      ctx.shadowBlur=0;
-    }
-    ctx.font='6px "Press Start 2P"'; ctx.fillStyle=p.ring+'99';
-    ctx.fillText('STAGE '+(this.stage+1),W/2,132);
-    const rk=rankFor(this.ranks,this.score);
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring;
-    ctx.fillText(rk.t,W/2,H-42);
-    const nx=nextRank(this.ranks,this.score);
-    if(nx){
-      ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)';
-      ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26);
-    }
-    ctx.restore();
-    if(this.st==='ready') drawReadyScreen(p,'CHAIN',['TAP WHEN THE CHIP ENTERS','THE GLOWING ZONE','MISS OR OVERSHOOT = BREAK']);
-    if(this.st==='over') drawOverScreen(p,'CHAIN BROKEN',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'REACHED STAGE '+(this.stage+1));
-  },
-  tap(){
-    if(this.st==='ready'){ this.start(); return; }
-    if(this.st==='over'){
-      if(performance.now()-this.overAt>450){ this.init(); this.start(); }
-      return;
-    }
-    const d=wrap(this.angle-this.zoneC);
-    if(Math.abs(d)<=this.zoneHalf) this.success(d);
-    else this.breakChain();
-  }
-};
-
-// ════════════════════════════════════════════════════════════════
-//  GAME 4: CHATTER  (the 90s NZ playground classic)
+//  GAME 3: CHATTER  (the 90s NZ playground classic)
 // ════════════════════════════════════════════════════════════════
 const CHATTER={
   id:'chatter', name:'CHATTER', tag:'KEEP THE DISCS ALIVE',
@@ -1139,8 +923,9 @@ const CHATTER={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 5: SWINGBALL  (endless tetherball — wind the rope up the pole)
-//  Adapted from CHAIN's ring-timing core, but a separate game (D1):
+//  GAME 4: SWINGBALL  (endless tetherball — wind the rope up the pole)
+//  Ring-timing core originated with CHAIN (pruned in Phase 5); SWINGBALL
+//  now owns it as the reference implementation, and is a separate game (D1):
 //  a spiral WIND meter is the differentiator; filling it banks a LOOP
 //  (score multiplier +1) and steps difficulty up. Only a miss/break ends it.
 // ════════════════════════════════════════════════════════════════
@@ -1184,7 +969,7 @@ const SWINGBALL={
     this.baseSpeed=Math.min(this.SPEED_CAP,this.baseSpeed+this.LOOP_SPEED_STEP);
     this.baseZone=Math.max(this.ZONE_FLOOR,this.baseZone-this.LOOP_ZONE_STEP);
     this.speed=this.baseSpeed; this.zoneHalf=this.baseZone;
-    this.timeScale=0.35; this.grace=0.3; // grace through the slow-mo (mirrors CHAIN)
+    this.timeScale=0.35; this.grace=0.3; // grace through the slow-mo
     this.banner={t:'LOOP ×'+this.mult()+'!',life:1.5};
     burst(this.CX,this.CY,'#ffd24a',24,5); burst(this.CX,this.CY,'#fff',8,3);
     sStage(); buzz(30); this.shake=6;
@@ -1231,7 +1016,8 @@ const SWINGBALL={
     if(this.grace>0) this.grace-=dt;
     if(this.wobble>0) this.wobble=Math.max(0,this.wobble-dt*1.8);
     if(this.st==='play'){
-      // overshoot/miss detection ported verbatim from CHAIN — edit with care.
+      // overshoot/miss detection: the wasInside/sign-crossing core (CHAIN was
+      // the original; this is now the reference implementation) — edit with care.
       const prevD=wrap(this.angle-this.zoneC);
       this.angle=wrap(this.angle+this.dir*this.speed*dt*this.timeScale);
       const d=wrap(this.angle-this.zoneC);
@@ -1376,7 +1162,7 @@ const SWINGBALL={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 6: SCRAMBLE  (the lolly scramble, inverted — you throw)
+//  GAME 5: SCRAMBLE  (the lolly scramble, inverted — you throw)
 //  Score rewards EVENNESS, not volume: rate × (1 − stddev/maxStddev),
 //  with a FAIR SHARE ×2 when everyone is fed and level (CHATTER analogue).
 //  Kids' meters decay (greedy kids faster); an empty meter costs a life.
@@ -1636,7 +1422,7 @@ const SCRAMBLE={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 7: KNUCKLEBONES  (digitised jacks — catch the toss)
+//  GAME 6: KNUCKLEBONES  (digitised jacks — catch the toss)
 //  Gold bones = CATCH (tap airborne); grey bones = SKIP (leave them).
 //  A missed catch OR a wrong tap = a drop; 3 drops = over. The traditional
 //  sequence is the level ladder; it loops endlessly, faster, after the top.
@@ -1845,7 +1631,7 @@ const KNUCKLEBONES={
 // ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence)
+const GAMES=[STACK,SCAN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence)
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -1870,7 +1656,7 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 const GAUNTLET={
   // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
-  PALMAP:{stack:0,scan:1,chain:2,swing:3,chatter:3,scramble:4,bones:5},
+  PALMAP:{stack:0,scan:1,swing:3,chatter:3,scramble:4,bones:5}, // PALS[2] freed by CHAIN prune — now the hub palette
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   beginDaily(){
@@ -2053,7 +1839,7 @@ const GAUNTLET={
 let menuBests={};
 function refreshMenuBests(){
   GAMES.forEach(g=>{
-    menuBests[g.id]=loadBest(g.bestKey, g.id==='stack'?'cps2_best':(g.id==='chain'?'chain_best':null));
+    menuBests[g.id]=loadBest(g.bestKey, g.id==='stack'?'cps2_best':null);
   });
 }
 // Cached daily state for the page-0 tile (avoids parsing arc_daily_state every frame).
@@ -2099,7 +1885,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -2115,15 +1901,6 @@ function drawMenuIcon(g,cx,cy){
     ctx.lineWidth=2.5; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(-16,20); ctx.lineTo(-2,2); ctx.stroke();
     ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2,2,3,0,Math.PI*2); ctx.fill();
-  } else if(g.id==='chain'){
-    ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=4;
-    ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.stroke();
-    ctx.strokeStyle=PALS[2].glow; ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=8;
-    ctx.lineWidth=5; ctx.lineCap='round';
-    ctx.beginPath(); ctx.arc(0,0,20,-0.6,0.6); ctx.stroke();
-    ctx.shadowBlur=0;
-    rr(-27,-8,16,16,5); ctx.fillStyle='#e85d15'; ctx.fill();
-    drawMark(-19,0,11,'#f5ece0');
   } else if(g.id==='swing'){
     // pole + rope + orbiting ball carrying the mark
     rr(-3,-22,6,44,3); ctx.fillStyle='#5a4324'; ctx.fill();
@@ -2222,11 +1999,11 @@ function drawMenu(){
   ctx.fillText('CENTRARCADE',W/2,138);
   ctx.shadowBlur=0;
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-  ctx.fillText('SEVEN QUICK GAMES \u00b7 ONE THUMB',W/2,158);
+  ctx.fillText(GAMES.length+' QUICK GAMES \u00b7 ONE THUMB',W/2,158); // count derives from GAMES.length so it never drifts
   if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id];
+    const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');

@@ -4,7 +4,7 @@ Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 
 
 **Phases 1–4.5 shipped**: fixes, the seven-game roster + paginated menu, the gauntlet, the once-a-day seeded **TUCK SHOP RUN** daily, and the 4.5 revision pass (R1 SCRAMBLE dial-up, R3 daily-only gauntlet + full-page daily tile, R4 SWINGBALL 45° view, R5 KNUCKLEBONES pacing).
 
-**Phase 5 is next and is the largest change since Phase 2**: CHAIN is pruned, and five deliberately *different-feeling* games join — HOWLER, GUNGE, TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster is stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog, grid-rotation, directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11**.
+**Phase 5 is underway and is the largest change since Phase 2**: CHAIN is **pruned (Unit 5.0, shipped)**, and five deliberately *different-feeling* games still join — HOWLER, GUNGE, TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster is stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog, grid-rotation, directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11** — currently at **6** (the five new games pending).
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -171,20 +171,23 @@ Phase 5 palette intent (see each game below): HOWLER `0`, GUNGE new green-slime 
 
 ---
 
-### Phase 5 — Prune CHAIN + five different-style games ⬅ **NEXT**
+### Phase 5 — Prune CHAIN + five different-style games ⬅ **IN PROGRESS**
 
-**Why**: every current game is a tap — either timing a moving thing (STACK, CHAIN, SWINGBALL, CHATTER) or hitting a target (SCAN, SCRAMBLE, BONES). The hub is cohesive but monotonous over a 5–10 min daily. Phase 5 buys variety of *verb*, not just of theme.
+**Why**: every current game is a tap — either timing a moving thing (STACK, SWINGBALL, CHATTER) or hitting a target (SCAN, SCRAMBLE, BONES). The hub is cohesive but monotonous over a 5–10 min daily. Phase 5 buys variety of *verb*, not just of theme.
 
-**Order of work**: (1) prune CHAIN, (2) pointer-stream contract extension, (3) palette-cycle fix + new palettes, (4) games in the order below. Ship them one at a time — each is independently mergeable and independently prunable.
+**Order of work**: (1) prune CHAIN ✅ **shipped**, (2) pointer-stream contract extension, (3) palette-cycle fix + new palettes, (4) games in the order below. Ship them one at a time — each is independently mergeable and independently prunable.
 
-#### 5.0 — Prune CHAIN
+#### 5.0 — Prune CHAIN ✅ SHIPPED
 
-- Remove the `CHAIN` object; drop `chain` from `GAMES`, `PALMAP`, and the menu icon/card palette lookups. Delete its `drawMenuIcon` branch.
-- **Keep `arc_chain_best` and `chain_best`** (rule 10, §2). Do not delete, do not migrate into another game — SWINGBALL explicitly never inherits CHAIN's history (D1).
-- **SWINGBALL becomes the canonical home of the `wasInside`/sign-crossing overshoot detection.** CHAIN was the original; the comment in SWINGBALL currently says "ported verbatim from CHAIN — edit with care." Update it to say it *is* the reference implementation. It is subtle, correct, and the source of both games' feel — do not refactor it while deleting CHAIN.
-- PALS[2] becomes the hub palette (§3).
-- Menu copy: `'SEVEN QUICK GAMES · ONE THUMB'` is now wrong. Make the count derive from `GAMES.length` so it can never drift again.
+As-shipped (this is the record; code in `index.html` is the source of truth):
+
+- **`CHAIN` object removed**; `chain` dropped from `GAMES`, `PALMAP`, both `drawMenuIcon`/card palette lookups, and its `drawMenuIcon` branch deleted. `refreshMenuBests` no longer special-cases `chain` (only STACK's `cps2_best` legacy remains).
+- **`arc_chain_best` and `chain_best` retained, dormant** (rule 10, §2) — unread, never deleted, present nowhere in `index.html`. SWINGBALL keeps its fresh `arc_swing_best` with no inheritance (D1).
+- **SWINGBALL now owns the `wasInside`/sign-crossing overshoot core** as the reference implementation; its comments say so and the "ported verbatim from CHAIN" note is gone. **Logic untouched** — only comments changed.
+- **PALS[2] is the hub palette** — unmapped by any game, still driving the menu title glow, interstitials, end card, and pause overlay.
+- **Menu subtitle derives from `GAMES.length`** → renders `6 QUICK GAMES · ONE THUMB` (digit, not a spelled word — owner-chosen). Can't drift again.
 - Roster: STACK → SCAN → SWINGBALL → CHATTER → SCRAMBLE → KNUCKLEBONES (6). Daily is 6 games until the new ones land, then 11.
+- **Beyond spec**: the source-file `GAME N` section labels were resequenced 1–6 to close the gap CHAIN left (comment-only). They track *file order*, not the `GAMES`/daily sequence — see §7.
 
 #### 5.1 — HOWLER (`id:'howler'`, `arc_howler_best`, PALS[0])
 
@@ -311,6 +314,7 @@ Phase 5 palette intent (see each game below): HOWLER `0`, GUNGE new green-slime 
 - **Which games get pruned next**, and the target roster size. CHAIN was first (D10).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
 - **New `PALS` entries for Phase 5** — requires the CHATTER explicit-cycle fix first (§3). Alternative is drawing surfaces directly (asphalt-court precedent).
+- **Source `GAME N` section labels track file order, not roster order** (surfaced during the 5.0 prune). They were renumbered 1–6 after CHAIN's removal, but the file lays CHATTER's block *before* SWINGBALL's while `GAMES` runs SWINGBALL *before* CHATTER — so "GAME 3: CHATTER" is actually the 4th game in the daily sequence. This mismatch predates the prune (it was CHAIN-shaped before). Harmless — they're only comments — but do not read them as roster/daily indices. Decide whether to reorder the source blocks to match `GAMES`, or drop the numbers entirely, when the five new games land.
 
 ## 8. Style conventions
 
