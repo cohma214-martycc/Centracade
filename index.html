@@ -1640,9 +1640,270 @@ const KNUCKLEBONES={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME 7: GUNGE  (Phase 5.2 — the gunge-tank pipe puzzle)
+//  Verb: tap-to-rotate. The hub's only puzzle — think under a clock,
+//  don't react. Tap a 5×5 pipe tile to rotate it 90°; connect the
+//  top valve to the bottom tank, then hit the drawn RELEASE valve to
+//  let the neon gunge flow. Tap-only (no press()) — stays on tap()
+//  per D12/§3. Joins the daily (D11); endless + 3 lives (D14).
+//
+//  D16 — the board is generated correct-by-construction, never
+//  generate-and-hope. genBoard(): carve ONE simple source→dest path
+//  (randomised DFS), assign each path cell the SHAPE its two
+//  connections require (straight or elbow — always a 2-opening tile,
+//  so a solved path never branches into a decoy and cannot leak),
+//  drop random decoy tiles in the rest, then scramble ONLY rotations.
+//  Every shape's solving orientation is one of its 4 rotations, so a
+//  solution provably exists after any scramble — a shared unsolvable
+//  daily board is structurally impossible. All draws route through
+//  srnd(this): daily is reproducible, free play uses Math.random.
+//
+//  RELEASE valve (D17) — remaining time only banks as score if you
+//  commit early. Outcome matrix:
+//    release,       solved     → score += remaining × segments, advance
+//    release,       mis-solved → leak, lose a life
+//    auto-release@0, solved     → gunge lands, 0 points, NO life lost
+//    auto-release@0, mis-solved → leak, lose a life
+//  ("solved" = gunge reaches the tank cleanly with no spill. Segments
+//  is fixed by the generated path, so the gamble is time-vs-commit,
+//  not "did I misread my pipes" — connected pipes are lit from the
+//  source so the board is always readable. The valve sits well clear
+//  of the grid at the bottom (DAIRY-button style); tapping it can
+//  cost a life, but §8 holds — stray taps elsewhere are free no-ops,
+//  and there is no confirm dialog: the snap decision is the point.)
+// ════════════════════════════════════════════════════════════════
+const GUNGE={
+  id:'gunge', name:'GUNGE', tag:'CONNECT THE PIPES',
+  bestKey:'arc_gunge_best',
+  par:300, // PROVISIONAL — pure guess against remaining×segments; instrument early
+  ranks:[{s:0,t:'STUDIO AUDIENCE'},{s:150,t:'BUCKET CATCHER'},{s:400,t:'PIPE PLUMBER'},{s:800,t:'VALVE MASTER'},{s:1400,t:'GUNGE TANK LEGEND'}], // PROVISIONAL
+  GX:30, GY:150, GRID_PX:300,           // grid box (logical px); cell size derives from N
+  TIME_BASE:16, TIME_STEP:1.2, TIME_FLOOR:7, // per-board countdown (s) — PROVISIONAL
+  FILL_STEP:0.055,                      // seconds per cell of the release animation
+  PW:0.30,                              // pipe width as a fraction of the cell
+  // Direction bits: N=1 E=2 S=4 W=8. Shapes (base masks): straight 5, elbow 3, tee 7, dead 1.
+  DIRS:[1,2,4,8],
+  init(){
+    this.N=5; this.cell=this.GRID_PX/this.N;
+    this.lives=3; this.score=0; this.stage=0;
+    this.phase='build';           // 'build' (rotating) | 'flow' (gunge propagating)
+    this.result=null; this.fillN=0; this.stopN=0; this.flowT=0;
+    this.shake=0; this.banner=null; this.rejectAt=0;
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.genBoard();
+  },
+  pal(){ return PALS[6]; }, // slime lime
+  start(){ this.st='play'; },
+  // ── geometry helpers ──
+  nbIdx(idx,bit){
+    const N=this.N; let c=idx%N, r=(idx/N)|0;
+    if(bit===1) r--; else if(bit===4) r++; else if(bit===2) c++; else c--;
+    return (c<0||c>=N||r<0||r>=N) ? -1 : r*N+c;
+  },
+  opp(bit){ return bit===1?4:bit===4?1:bit===2?8:2; },
+  rotCW(m){ return ((m<<1)|(m>>3))&15; },
+  rotMask(shape,r){ let m=shape; for(let i=0;i<(r&3);i++) m=this.rotCW(m); return m; },
+  dirBit(from,to){ // bit on 'from' pointing at adjacent 'to'
+    const N=this.N, d=to-from;
+    if(d===-N) return 1; if(d===N) return 4; if(d===1) return 2; return 8;
+  },
+  shapeFor(mask){ return (mask===5||mask===10) ? 5 : 3; }, // 2 collinear bits → straight, else elbow
+  // ── D16 board generation: solved-then-scrambled ──
+  carve(src,dst){ // randomised DFS → one simple path src→dst
+    const N=this.N, seen=new Array(N*N).fill(false), path=[], self=this;
+    function dfs(idx){
+      seen[idx]=true; path.push(idx);
+      if(idx===dst) return true;
+      const ds=self.DIRS.slice();
+      for(let i=ds.length-1;i>0;i--){ const j=Math.floor(srnd(self)*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
+      for(let k=0;k<ds.length;k++){ const n=self.nbIdx(idx,ds[k]); if(n>=0&&!seen[n]&&dfs(n)) return true; }
+      path.pop(); seen[idx]=false; return false;
+    }
+    dfs(src);
+    return path;
+  },
+  genBoard(){
+    const N=this.N=(this.stage>=3?6:5);
+    this.cell=this.GRID_PX/N;
+    const src=Math.floor(srnd(this)*N);              // source on the top edge (valve inlet from N)
+    const dst=(N-1)*N+Math.floor(srnd(this)*N);      // dest on the bottom edge (tank outlet to S)
+    this.srcIdx=src; this.dstIdx=dst;
+    const path=this.carve(src,dst);
+    const mask=new Array(N*N).fill(0);
+    for(let i=0;i<path.length;i++){
+      const idx=path[i]; let m=0;
+      if(i>0) m|=this.dirBit(idx,path[i-1]);
+      if(i<path.length-1) m|=this.dirBit(idx,path[i+1]);
+      if(idx===src) m|=1;   // valve inlet
+      if(idx===dst) m|=4;   // tank outlet
+      mask[idx]=m;
+    }
+    const decoy=[5,3,7,1];
+    this.tiles=new Array(N*N);
+    for(let idx=0;idx<N*N;idx++){
+      const shape = mask[idx] ? this.shapeFor(mask[idx]) : decoy[Math.floor(srnd(this)*decoy.length)];
+      this.tiles[idx]={shape, r:0, path:!!mask[idx]};
+    }
+    for(let idx=0;idx<N*N;idx++) this.tiles[idx].r=Math.floor(srnd(this)*4); // scramble rotations ONLY
+    this.timeLeft=this.stageTime();
+    this.phase='build'; this.result=null; this.fillN=0; this.flowT=0;
+    this.recompute();
+  },
+  stageTime(){ return Math.max(this.TIME_FLOOR, this.TIME_BASE-this.stage*this.TIME_STEP); },
+  // ── connectivity: flood from the source through matching openings ──
+  flow(){
+    const N=this.N, src=this.srcIdx, dst=this.dstIdx;
+    const open=idx=>this.rotMask(this.tiles[idx].shape,this.tiles[idx].r);
+    const lit=new Array(N*N).fill(false), order=[];
+    let leaked=false, leakCell=-1;
+    if(open(src)&1){                                   // gunge only enters if the source accepts the valve
+      const q=[src]; lit[src]=true;
+      while(q.length){
+        const idx=q.shift(); order.push(idx); const om=open(idx);
+        for(let d=0;d<4;d++){ const b=this.DIRS[d]; if(!(om&b)) continue;
+          const n=this.nbIdx(idx,b);
+          if(n<0){ const legit=(idx===src&&b===1)||(idx===dst&&b===4);
+            if(!legit&&leakCell<0){ leaked=true; leakCell=idx; } continue; }
+          if(open(n)&this.opp(b)){ if(!lit[n]){ lit[n]=true; q.push(n); } }
+          else if(leakCell<0){ leaked=true; leakCell=idx; }   // open pipe spilling against a wall
+        }
+      }
+    }
+    const reachedDest = lit[dst] && !!(open(dst)&4);
+    return {lit, order, leaked, leakCell, reachedDest, segments:order.length};
+  },
+  recompute(){ this.flowInfo=this.flow(); }, // cached lighting for the build phase
+  // ── release the valve (manual, or auto at timeLeft 0) ──
+  release(){
+    if(this.phase!=='build') return;
+    const f=this.result=this.flow();
+    this.solved = f.reachedDest && !f.leaked;
+    this.gained = this.solved ? Math.max(0,Math.round(this.timeLeft))*f.segments : 0;
+    this.stopN = f.leaked ? (f.order.indexOf(f.leakCell)+1) : f.order.length;
+    this.phase='flow'; this.flowT=0; this.fillN=0;
+    sTick(0.05);
+  },
+  resolveFlow(){
+    const f=this.result;
+    if(this.solved){
+      this.score+=this.gained;
+      if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+      const d=this.dstIdx, N=this.N, cx=this.GX+(d%N)*this.cell+this.cell/2, cy=this.GY+((d/N)|0)*this.cell+this.cell/2;
+      burst(cx,cy,this.pal().glow,18,4); burst(cx,cy,'#eaffcf',8,2.6);
+      pop(this.gained>0?'+'+this.gained:'GUNGED!',cx,cy-20,this.pal().ring,8);
+      sGold(); buzz(20); this.shake=6;
+      this.stage++; this.banner={t:'GUNGED!',life:1.3}; this.genBoard();
+    } else {
+      const lc=f.leakCell>=0?f.leakCell:this.srcIdx, N=this.N;
+      const cx=this.GX+(lc%N)*this.cell+this.cell/2, cy=this.GY+((lc/N)|0)*this.cell+this.cell/2;
+      burst(cx,cy,'#a6ff44',16,3.8); pop('LEAK!',cx,cy-20,'#ff5a5a',8);
+      sBad(); buzz(50); this.shake=8; this.lives--;
+      if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
+      else this.genBoard(); // fresh board, same stage
+    }
+  },
+  update(dt){
+    this.shake*=0.82;
+    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+    if(this.st!=='play') return;
+    if(this.phase==='build'){
+      this.timeLeft-=dt;
+      if(this.timeLeft<=0){ this.timeLeft=0; this.release(); } // auto-release banks no time
+    } else if(this.phase==='flow'){
+      this.flowT+=dt;
+      this.fillN=Math.min(this.stopN, Math.floor(this.flowT/this.FILL_STEP));
+      if(this.fillN>=this.stopN) this.resolveFlow();
+    }
+  },
+  // ── drawing ──
+  valveRect(){ return {x:W/2-74, y:466, w:148, h:46}; },
+  drawTile(idx){
+    const N=this.N, s=this.cell, col=idx%N, row=(idx/N)|0;
+    const x0=this.GX+col*s, y0=this.GY+row*s, cx=x0+s/2, cy=y0+s/2;
+    const p=this.pal(), t=this.tiles[idx], om=this.rotMask(t.shape,t.r);
+    const filled = this.phase==='flow' && this.result && this.result.order.indexOf(idx)>=0 && this.result.order.indexOf(idx)<this.fillN;
+    const lit = this.phase==='build' && this.flowInfo && this.flowInfo.lit[idx];
+    // tile base
+    rr(x0+2,y0+2,s-4,s-4,7); ctx.fillStyle='#0c1a08'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; rr(x0+2,y0+2,s-4,s-4,7); ctx.stroke();
+    // pipe arms
+    const pw=s*this.PW, col2 = filled?p.glow : lit?p.ring : '#4a5a3a';
+    ctx.save();
+    if(filled){ ctx.shadowColor=p.glow; ctx.shadowBlur=12; } else if(lit){ ctx.shadowColor=p.ring; ctx.shadowBlur=6; }
+    ctx.fillStyle=col2;
+    if(om&1){ rr(cx-pw/2,y0,pw,s/2+2,pw*0.4); ctx.fill(); }
+    if(om&4){ rr(cx-pw/2,cy-2,pw,s/2+2,pw*0.4); ctx.fill(); }
+    if(om&2){ rr(cx-2,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
+    if(om&8){ rr(x0,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
+    ctx.beginPath(); ctx.arc(cx,cy,pw*0.62,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // endpoint markers
+    if(idx===this.srcIdx){ ctx.fillStyle=p.acc; rr(cx-9,y0-6,18,7,2); ctx.fill(); }       // valve cap above source
+    if(idx===this.dstIdx){ ctx.fillStyle=p.acc; rr(cx-11,y0+s-1,22,7,2); ctx.fill(); }     // tank lip below dest
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('STAGE '+(this.stage+1),W/2,128);
+    // countdown bar (the puzzle clock — not a score cap; game is endless, D3)
+    const bx=44, bw=W-88, frac=Math.max(0,Math.min(1,this.timeLeft/this.stageTime()));
+    rr(bx-1,135,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    ctx.fillStyle=frac<0.25?'#ff5a5a':(frac<0.5?'#ffd24a':p.ring);
+    rr(bx,136,Math.max(0,bw*frac),6,2); ctx.fill();
+    // grid
+    for(let idx=0;idx<this.N*this.N;idx++) this.drawTile(idx);
+    drawFX();
+    // RELEASE valve button (drawn, rule 4)
+    const v=this.valveRect(), enabled=this.phase==='build'&&this.st==='play';
+    ctx.save(); ctx.globalAlpha=enabled?1:0.4;
+    rr(v.x,v.y,v.w,v.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(v.x,v.y,v.w,v.h,10); ctx.stroke();
+    const vcx=v.x+26, vcy=v.y+v.h/2; // little valve wheel
+    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(vcx,vcy,9,0,Math.PI*2); ctx.stroke();
+    for(let a=0;a<4;a++){ const an=a*Math.PI/2; ctx.beginPath(); ctx.moveTo(vcx+Math.cos(an)*9,vcy+Math.sin(an)*9); ctx.lineTo(vcx+Math.cos(an)*14,vcy+Math.sin(an)*14); ctx.stroke(); }
+    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('RELEASE',v.x+44,vcy+3);
+    ctx.restore();
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='11px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,148); ctx.restore(); }
+    // rank
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'GUNGE',['TAP A PIPE TO ROTATE IT','CONNECT THE TOP VALVE TO THE TANK','LIT PIPES ARE LINKED TO THE VALVE','HIT RELEASE EARLY TO BANK THE CLOCK']);
+    if(this.st==='over') drawOverScreen(p,'TANK OVERFLOWED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1));
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    if(this.phase!=='build') return;                     // locked while the gunge is flowing
+    if(inR(x,y,this.valveRect())){ this.release(); return; }
+    const N=this.N, s=this.cell;
+    const col=Math.floor((x-this.GX)/s), row=Math.floor((y-this.GY)/s);
+    if(col<0||col>=N||row<0||row>=N){ this.rejectAt=performance.now(); return; } // outside grid = free no-op
+    const idx=row*N+col; this.tiles[idx].r=(this.tiles[idx].r+1)&3;
+    this.recompute(); sTick(0.03); buzz(6);
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence)
+const GAMES=[STACK,SCAN,SWINGBALL,GUNGE,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — GUNGE slotted after SWINGBALL per §5.6
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -1667,7 +1928,7 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 const GAUNTLET={
   // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
-  PALMAP:{stack:0,scan:1,swing:3,chatter:3,scramble:4,bones:5}, // PALS[2] freed by CHAIN prune — now the hub palette
+  PALMAP:{stack:0,scan:1,swing:3,gunge:6,chatter:3,scramble:4,bones:5}, // PALS[2] freed by CHAIN prune — now the hub palette
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   beginDaily(){
@@ -1896,7 +2157,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -1936,6 +2197,16 @@ function drawMenuIcon(g,cx,cy){
     rr(-10,5,20,6,6); ctx.fillStyle='#3a2410'; ctx.fill();
     ctx.fillStyle='#111'; ctx.fillRect(-5,12,3,3); ctx.fillRect(3,12,3,3);
     ctx.strokeStyle='#7a1020'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(0,16,3,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
+  } else if(g.id==='gunge'){
+    // a pipe tile dripping neon gunge into a tank (rule 4 — all drawn)
+    const s=PALS[6];
+    rr(-19,-21,38,34,7); ctx.fillStyle='#0c1a06'; ctx.fill();
+    ctx.strokeStyle=s.ring; ctx.lineWidth=2; rr(-19,-21,38,34,7); ctx.stroke();
+    ctx.fillStyle='#3a4a2a'; rr(-6,-21,12,34,4); ctx.fill(); rr(-19,-6,38,12,4); ctx.fill();
+    ctx.save(); ctx.shadowColor=s.glow; ctx.shadowBlur=10; ctx.fillStyle=s.glow;
+    rr(-4,-21,8,32,3); ctx.fill(); ctx.restore();
+    ctx.fillStyle=s.ring; ctx.beginPath(); ctx.arc(0,16,3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#2a3a1a'; rr(-12,19,24,7,2); ctx.fill(); // tank lip
   } else if(g.id==='bones'){
     // a little pile of knucklebones, one gold one tossed above
     [[-12,9,0.3,'#f0e6d0'],[11,11,-0.4,'#f0e6d0'],[-1,0,0.12,'#f0e6d0'],[1,-17,0,'#ffd24a']].forEach(bn=>{

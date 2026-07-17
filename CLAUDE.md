@@ -4,7 +4,7 @@ Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 
 
 **Phases 1–4.5 shipped**: fixes, the seven-game roster + paginated menu, the gauntlet, the once-a-day seeded **TUCK SHOP RUN** daily, and the 4.5 revision pass (R1 SCRAMBLE dial-up, R3 daily-only gauntlet + full-page daily tile, R4 SWINGBALL 45° view, R5 KNUCKLEBONES pacing).
 
-**Phase 5 is underway and is the largest change since Phase 2**: CHAIN is **pruned (Unit 5.0, shipped)**, and five deliberately *different-feeling* games still join — HOWLER, GUNGE, TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster is stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog, grid-rotation, directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11** — currently at **6** (the five new games pending).
+**Phase 5 is underway and is the largest change since Phase 2**: CHAIN is **pruned (Unit 5.0, shipped)**, **GUNGE has shipped (Unit 5.2)**, and four deliberately *different-feeling* games still join — HOWLER, TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster was stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog, grid-rotation (GUNGE — the first puzzle in the hub), directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11** — currently at **7** (GUNGE landed; four new games pending).
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -138,7 +138,7 @@ The existing `menuDrag` logic already proves the pattern: menu resolves on `poin
 
 With CHAIN gone, **CHATTER is the only palette-cycling game**. Its stage cycle is now an **explicit index list** (`CHATTER_PALS`, Unit 2) instead of `(2+stage)%PALS.length` — the list reproduces the old sequence byte-for-byte (`2,3,4,5,0,1,…`) but is decoupled from `PALS.length`, so appending palettes can no longer silently recolour CHATTER's stages. (Note: the shipped list preserves current colours; it is **not** the illustrative `[3,4,5,0,1,2]` that once appeared here, which would have recoloured stage 0.)
 
-Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWLER reuses `0`; **`6` GUNGE** slime lime, **`7` TAZO** electric holo blue, **`8` DAIRY** warm caramel, **`9` WEAVER** navy + red-sock. All four hues are **tentative** — retune when the owning game is built. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
+Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWLER reuses `0`; **`6` GUNGE** slime lime (**now referenced** — `PALMAP.gunge=6`, menu-icon + card lookups), **`7` TAZO** electric holo blue, **`8` DAIRY** warm caramel, **`9` WEAVER** navy + red-sock. `7`/`8`/`9` hues stay **tentative** — retune when the owning game is built. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
 
 ---
 
@@ -177,7 +177,7 @@ Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWL
 
 **Why**: every current game is a tap — either timing a moving thing (STACK, SWINGBALL, CHATTER) or hitting a target (SCAN, SCRAMBLE, BONES). The hub is cohesive but monotonous over a 5–10 min daily. Phase 5 buys variety of *verb*, not just of theme.
 
-**Order of work**: (1) prune CHAIN ✅ **shipped**, (2) pointer-stream contract extension, (3) palette-cycle fix + new palettes, (4) games in the order below. Ship them one at a time — each is independently mergeable and independently prunable.
+**Order of work**: (1) prune CHAIN ✅ **shipped**, (2) pointer-stream contract extension, (3) palette-cycle fix + new palettes, (4) games in the order below — GUNGE ✅ **shipped (5.2)**, HOWLER/TAZO/DAIRY/WEAVER pending. Ship them one at a time — each is independently mergeable and independently prunable.
 
 #### 5.0 — Prune CHAIN ✅ SHIPPED
 
@@ -204,18 +204,24 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 - **Ranks** (NZ playground): BACKYARD ARM → OVER THE CLOTHESLINE → ONTO THE GARAGE ROOF → NEXT DOOR'S SECTION → GONE OVER THE FENCE → WHISTLER.
 - `par:500` PROVISIONAL — pure guess against 100/hit; instrument early.
 
-#### 5.2 — GUNGE (`id:'gunge'`, `arc_gunge_best`, new slime-green palette)
+#### 5.2 — GUNGE (`id:'gunge'`, `arc_gunge_best`, PALS[6] slime lime) ✅ SHIPPED (Unit 5.2)
 
-**Hook**: Sunday-morning kids' TV, the gunge tank. **Verb**: tap-to-rotate. **Ethos**: the only *puzzle* in the hub — thinking under a clock instead of reacting.
+**Hook**: Sunday-morning kids' TV, the gunge tank. **Verb**: tap-to-rotate. **Ethos**: the only *puzzle* in the hub — thinking under a clock instead of reacting. As-shipped (code in `index.html` is the source of truth):
 
-- **Grid**: 5×5 of pipe tiles (straights, elbows, tees, dead ends). Tap a cell → `rotation = (rotation + π/2) % 2π`. **No new input needed** — this ships on the existing `tap(x,y)`, which makes it the cheapest of the five and a good second build.
-- **Generation is the whole game, and it must be generated solved-then-scrambled.** Lay a valid source→destination path first, decorate with filler tiles, then randomise every tile's rotation. **Never generate randomly and hope.** A seeded unsolvable board in the daily would be a shared, reproducible, un-winnable experience for every player that day — the single worst failure mode in Phase 5.
-- **Loop**: a countdown runs; when it hits zero the valve opens and neon-green gunge propagates through the connected path frame-by-frame. Clean connection = the target gets gunged (celebration, not punishment — the gunge landing is the *win*).
-- **Loss**: gunge hits a dead end or an open edge → overflow leak; or the timer expires unconnected. 3 fails = over.
-- **Score**: `remaining time × segments used` — per spec, this deliberately rewards elaborate loops over the shortest path. Endless: 5×5 → 6×6, timer shrinks per stage.
-- **Seeded**: layout + scramble. Deterministic thereafter.
-- **Ranks**: STUDIO AUDIENCE → BUCKET CATCHER → PIPE PLUMBER → VALVE MASTER → GUNGE TANK LEGEND.
-- `par:300` PROVISIONAL.
+- **Grid**: N×N pipe tiles (straights, elbows, tees, dead ends). N=5, growing to **6 at stage 3** (spec's 5×5→6×6). Tap a cell → `r = (r+1) & 3` (90° step). **Tap-only** — no `press()`, so per D12/§3 it stays `tap()`-on-pointerdown; this was the cheapest of the five to build. Openings are a direction bitmask (N=1 E=2 S=4 W=8); shapes are base masks (straight 5, elbow 3, tee 7, dead 1) rotated by `r`.
+- **Generation — solved-then-scrambled (D16), verified**: `genBoard()` carves **one** simple source→dest path (randomised DFS, `carve()`), assigns each path cell the SHAPE its two connections require (always a **2-opening** straight/elbow, so a correctly-oriented path never branches into a decoy and cannot leak), fills the rest with random decoy tiles, then **scrambles rotations only**. Every shape's solving orientation is one of its four rotations, so a solution provably exists after any scramble — a shared unsolvable daily board is structurally impossible. Confirmed across 4000 seeded boards (both grid sizes): all solvable and leak-free; carved path length 5–34.
+- **Readability aid**: pipes currently connected to the source are **lit** (`flow()` caches `flowInfo` on every rotate). The board is always legible, so the gamble is time-vs-commit, not "did I misread my pipes."
+- **RELEASE valve (D17)**: a **drawn** valve button (rule 4) sits well clear of the grid at the bottom (DAIRY-button style). Gunge only flows when the valve is released. Manual release banks the remaining clock; if the player never commits, it **auto-releases at `timeLeft` 0** and banks nothing. Outcome matrix (mirrored in the code comment):
+  - release, **solved** → `score += remaining × segments`, advance a stage
+  - release, **mis-solved** → leak, lose a life
+  - auto-release@0, **solved** → gunge lands, **0 points, no life lost**
+  - auto-release@0, **mis-solved** → leak, lose a life
+
+  ("solved" = gunge reaches the tank cleanly with no spill; `segments` is fixed by the generated path. No confirm dialog — the snap decision is the point. Tapping the valve can cost a life, but §8 holds: stray taps elsewhere are free no-ops with a soft reject flash.)
+- **Loss**: a leak (gunge hits a dead end / open edge, or a mis-solved release) costs a life; **3 fails = over**. Endless (D14). The per-board countdown is a **puzzle clock, not a score cap** — the game never time-caps scoring (D3), it just ends on 3 fails.
+- **Seeded**: source/dest, carve, decoy fill, scramble — all via `srnd(this)`. Deterministic thereafter (propagation uses no randomness), so the daily replays identically.
+- **Roster**: slotted into `GAMES` **after SWINGBALL** to match the §5.6 final order; `PALMAP.gunge=6`; drawn menu icon (dripping pipe tile). Menu count, emoji grid, and `drawBars` all derive from `GAMES.length` — no manual bump needed.
+- **Ranks**: STUDIO AUDIENCE → BUCKET CATCHER → PIPE PLUMBER → VALVE MASTER → GUNGE TANK LEGEND. `par:300`, ranks, and per-board timings all **PROVISIONAL** — instrument and retune with the roster.
 
 #### 5.3 — TAZO TYCOON (`id:'tazo'`, `arc_tazo_best`, new palette)
 
@@ -307,6 +313,7 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 | D14 | **All five Phase 5 games are endless + 3-lives semantics**, not discrete levels — required for par normalisation to mean anything. *(Owner: may revisit.)* |
 | D15 | **Nostalgia names stay literal**: TAZO TYCOON, HOWLER, GUNGE. Owner has cleared these references. |
 | D16 | **Seeded content must be generated correct-by-construction**, never generate-and-hope: GUNGE solved-then-scrambled, WEAVER Hamiltonian-path-first. A shared unsolvable daily board is unacceptable. |
+| D17 | **GUNGE releases the gunge on a drawn RELEASE valve button**, not on a timer-expiry auto-open alone. Manual release banks the remaining clock into score (`remaining × segments`); auto-release at `timeLeft` 0 banks **no** time. A clean connection always lands the gunge and advances (0 points if released at 0, no life lost); a mis-solved release always leaks and costs a life. Resolves the spec contradiction where "valve opens at zero" left "remaining time" always zero. Rule 4 (button is drawn) and D12 (still tap-only, no `press`) both still hold. |
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
@@ -315,7 +322,7 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 - **HOWLER's whistle window** — the spec's 1.5–1.8 px/ms is not calibrated for 360×640. Must be measured on-device, not guessed.
 - **Which games get pruned next**, and the target roster size. CHAIN was first (D10).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
-- **New `PALS` entries for Phase 5** — ✅ added (Unit 2), after the CHATTER explicit-cycle fix that made growth safe. Four entries (`6` GUNGE, `7` TAZO, `8` DAIRY, `9` WEAVER); **their exact hues remain open** — provisional, retune per game. Drawing surfaces directly (asphalt-court precedent) is still available where a palette isn't warranted.
+- **New `PALS` entries for Phase 5** — ✅ added (Unit 2), after the CHATTER explicit-cycle fix that made growth safe. Four entries (`6` GUNGE, `7` TAZO, `8` DAIRY, `9` WEAVER); **GUNGE now ships on `6`** (retune with the roster), `7`/`8`/`9` hues **remain open** — provisional, retune per game. Drawing surfaces directly (asphalt-court precedent) is still available where a palette isn't warranted.
 - **CHATTER's in-play stage-0 colour is the "hub" PALS[2], and differs from its menu card** — surfaced when Unit 2 replaced `(2+stage)%PALS.length` with the explicit `CHATTER_PALS=[2,3,4,5,0,1]`. The list opens on `2`, so CHATTER's stage-0 (and every 6th stage) background/ring is the hub purple, while its **menu card** uses `PALMAP.chatter=3` (green). Both facts are **pre-existing** — the old modulo did exactly the same; the explicit list only made them visible, and Unit 2 preserved the sequence byte-for-byte. Open question: is CHATTER sharing the hub purple at stage 0 (and the card-vs-play colour mismatch) intended? If not, drop `2` from `CHATTER_PALS` — a deliberate, isolated one-line recolour, no longer a side effect of `PALS.length`.
 - **Source `GAME N` section labels track file order, not roster order** (surfaced during the 5.0 prune). They were renumbered 1–6 after CHAIN's removal, but the file lays CHATTER's block *before* SWINGBALL's while `GAMES` runs SWINGBALL *before* CHATTER — so "GAME 3: CHATTER" is actually the 4th game in the daily sequence. This mismatch predates the prune (it was CHAIN-shaped before). Harmless — they're only comments — but do not read them as roster/daily indices. Decide whether to reorder the source blocks to match `GAMES`, or drop the numbers entirely, when the five new games land.
 
