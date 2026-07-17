@@ -2,15 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!-- iOS standalone (home-screen web app) hard-lock — see rule 10 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#07050a">
 <title>CENTRARCADE</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 * { margin:0; padding:0; box-sizing:border-box; }
-html,body { height:100%; }
+html,body { height:100%; overscroll-behavior:none; }
+/* Fixed body + dvh so iOS standalone can't rubber-band or shift the viewport (rule 10). */
 body { background:#07050a; display:flex; align-items:center; justify-content:center;
-  height:100vh; overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; }
-canvas { display:block; cursor:pointer; }
+  position:fixed; inset:0; width:100%; height:100%; height:100dvh;
+  overflow:hidden; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+canvas { display:block; cursor:pointer; touch-action:none; }
 </style>
 </head>
 <body>
@@ -18,7 +25,7 @@ canvas { display:block; cursor:pointer; }
 <script>
 'use strict';
 // ════════════════════════════════════════════════════════════════
-//  CENTRARCADE — seven quick games, one thumb.
+//  CENTRARCADE — seven quick games + the TUCK SHOP RUN daily, one thumb.
 //  STACK · SCAN · CHAIN · SWINGBALL · CHATTER · SCRAMBLE · KNUCKLEBONES   (shared 16-bit engine)
 // ════════════════════════════════════════════════════════════════
 const c=document.getElementById('c');
@@ -37,6 +44,14 @@ function resize(){
 resize();
 window.addEventListener('resize',resize);
 window.addEventListener('orientationchange',resize);
+// iOS standalone viewport lock (rule 10): swallow the touch defaults that let the
+// page rubber-band, double-tap-zoom under rapid tapping, or shift in standalone mode.
+// Safe because all game input runs on pointer events, which dispatch before touch defaults.
+document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+document.addEventListener('touchstart',e=>{ if(e.target===c) e.preventDefault(); },{passive:false});
+document.addEventListener('gesturestart',e=>e.preventDefault());
+window.addEventListener('scroll',()=>window.scrollTo(0,0));
+if(window.visualViewport) window.visualViewport.addEventListener('resize',resize);
 
 // ── Shared 16-bit palettes ───────────────────────────────────────
 const PALS=[
@@ -1135,7 +1150,7 @@ const SWINGBALL={
   bestKey:'arc_swing_best', // fresh key — never inherits CHAIN's history (D1)
   par:40, // PROVISIONAL — retune from play data
   ranks:[{s:0,t:'DRIVEWAY DEBUT'},{s:15,t:'TIP AND RUN'},{s:35,t:'ONE HAND ONE BOUNCE'},{s:60,t:'SIX AND OUT'},{s:100,t:'OVER THE FENCE'},{s:160,t:'AUTO WICKY'},{s:240,t:'JANDAL SLOGGER'},{s:350,t:'BACKYARD TEST LEGEND'}],
-  CX:W/2, CY:312, R:104,
+  CX:W/2, CY:300, RX:126, RY:54, COILS:6, // R4: 45° ellipse view
   POLE_TOP:120, POLE_BOT:470,
   START_SPEED:1.7, SPEED_INC:0.05, SPEED_CAP:4.2,
   START_ZONE:0.42, ZONE_SHRINK:0.012, ZONE_FLOOR:0.14,
@@ -1149,7 +1164,7 @@ const SWINGBALL={
     this.wasInside=false;
     this.wind=0; this.loop=0;
     this.score=0; this.hits=0;
-    this.timeScale=1; this.shake=0; this.grace=0; this.flash=0;
+    this.timeScale=1; this.shake=0; this.grace=0; this.flash=0; this.wobble=0;
     this.best=loadBest(this.bestKey); // no legacy arg — no CHAIN inheritance
     this.newBest=false; this.trail=[]; this.ghosts=[]; this.banner=null;
     this.st='ready'; this.overAt=0;
@@ -1158,8 +1173,8 @@ const SWINGBALL={
   pal(){ return PALS[3]; }, // backyard green (gold accents added inline)
   mult(){ return 1+this.loop; },
   start(){ this.st='play'; },
-  ballPos(a){ return {x:this.CX+Math.cos(a)*this.R, y:this.CY+Math.sin(a)*this.R}; },
-  windHeight(){ return this.POLE_BOT-(this.POLE_BOT-this.POLE_TOP)*(this.wind/this.WIND_MAX); },
+  ballPos(a){ return {x:this.CX+Math.cos(a)*this.RX, y:this.CY+Math.sin(a)*this.RY}; }, // R4 ellipse
+  poleSway(){ return Math.sin(tick*0.45)*6*this.wobble; }, // cap+coil sway on a hit (shaft stays planted)
   placeZone(){
     this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
     this.wasInside=false;
@@ -1188,7 +1203,7 @@ const SWINGBALL={
     this.zoneHalf=Math.max(this.ZONE_FLOOR,this.zoneHalf-this.ZONE_SHRINK);
     this.wind+=perfect?this.WIND_PERFECT:this.WIND_HIT;
     if(this.wind>=this.WIND_MAX) this.bankLoop();
-    this.dir*=-1;
+    this.dir*=-1; this.wobble=1; // R4: wobble the cap+coil on every hit
     this.placeZone();
   },
   mistime(){
@@ -1198,7 +1213,7 @@ const SWINGBALL={
     pop('UNWIND',pos.x,pos.y-22,'#ff9a3a',6);
     beep(300,0.12,'sawtooth',0.04,180); buzz(10);
     this.shake=Math.max(this.shake,3);
-    this.dir*=-1;
+    this.dir*=-1; this.wobble=1;
     this.placeZone();
   },
   breakRope(){
@@ -1214,6 +1229,7 @@ const SWINGBALL={
     this.shake*=0.82;
     if(this.flash>0) this.flash-=0.04;
     if(this.grace>0) this.grace-=dt;
+    if(this.wobble>0) this.wobble=Math.max(0,this.wobble-dt*1.8);
     if(this.st==='play'){
       // overshoot/miss detection ported verbatim from CHAIN — edit with care.
       const prevD=wrap(this.angle-this.zoneC);
@@ -1235,49 +1251,57 @@ const SWINGBALL={
   },
   drawPole(){
     const p=this.pal();
+    // planted shaft (never sways)
     rr(this.CX-6,this.POLE_TOP,12,this.POLE_BOT-this.POLE_TOP+8,5); ctx.fillStyle='#3a2a16'; ctx.fill();
     rr(this.CX-6,this.POLE_TOP,4,this.POLE_BOT-this.POLE_TOP+8,3); ctx.fillStyle='#5a4324'; ctx.fill();
-    rr(this.CX-9,this.POLE_TOP-6,18,8,3); ctx.fillStyle=p.acc; ctx.fill();
-    // spiral wind meter — coils up the pole as the rope winds (gold near full)
-    const topY=this.windHeight();
-    ctx.save(); ctx.lineWidth=3; ctx.lineCap='round';
-    const col=this.wind>=this.WIND_MAX*0.75?'#ffd24a':p.glow;
-    ctx.strokeStyle=col; ctx.shadowColor=col; ctx.shadowBlur=8;
-    ctx.beginPath();
-    let first=true;
-    for(let t=0;t<=1.0001;t+=0.02){
-      const y=this.POLE_BOT-(this.POLE_BOT-topY)*t;
-      const a=t*6*Math.PI*2;
-      const x=this.CX+Math.cos(a)*9;
-      if(first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
+    // cap + rope coil sway together on a hit (R4)
+    const sx=this.CX+this.poleSway();
+    rr(sx-9,this.POLE_TOP-6,18,8,3); ctx.fillStyle=p.acc; ctx.fill();
+    // wind meter = a coil of rope rings stacked under the cap; round(wind/MAX*COILS) lit
+    const lit=Math.round(this.wind/this.WIND_MAX*this.COILS);
+    const gold=this.wind>=this.WIND_MAX*0.75;
+    for(let i=0;i<this.COILS;i++){
+      const y=this.POLE_TOP+8+i*7, on=i<lit, col=on?(gold?'#ffd24a':p.glow):'rgba(255,255,255,0.14)';
+      ctx.save(); if(on){ ctx.shadowColor=col; ctx.shadowBlur=6+8*this.flash; }
+      ctx.strokeStyle=col; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.ellipse(sx,y,8,3,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
     }
-    ctx.stroke(); ctx.restore();
-    ctx.save(); ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=10*this.flash+4;
-    ctx.beginPath(); ctx.arc(this.CX,topY,4,0,Math.PI*2); ctx.fill(); ctx.restore();
+  },
+  drawBall(){
+    const p=this.pal(), pos=this.ballPos(this.angle), sx=this.CX+this.poleSway();
+    // rope: pole-top (swaying cap) → ball, every frame
+    ctx.strokeStyle='rgba(240,230,200,0.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(sx,this.POLE_TOP-2); ctx.lineTo(pos.x,pos.y); ctx.stroke();
+    // trail (faint, behind the ball)
+    this.trail.forEach((t2,i)=>{
+      const f=i/this.trail.length;
+      ctx.globalAlpha=f*0.30; ctx.fillStyle=p.glow;
+      ctx.beginPath(); ctx.arc(t2.x,t2.y,(5+f*6)/2,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha=1;
+    // depth-scaled ball: 0.8 (far) → 1.15 (near)
+    const s=0.8+(Math.sin(this.angle)*0.5+0.5)*0.35, r=15*s;
+    ctx.save(); ctx.translate(pos.x,pos.y);
+    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+    drawMark(0,0,20*s,'#f5ece0');
+    ctx.restore();
   },
   render(){
     const p=this.pal();
     ctx.save();
     if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
     drawBG(p);
-    this.drawPole();
-    // orbit ring (the timing plane)
+    const near=Math.sin(this.angle)>=0; // near side = lower half of the 45° ellipse
+    // orbit ring (the timing plane) — faint guide behind everything
     ctx.save(); ctx.strokeStyle=p.ring; ctx.globalAlpha=0.12; ctx.lineWidth=12;
-    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
     ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,0,Math.PI*2); ctx.stroke();
-    // hit zone
-    if(this.st==='play'){
-      const pulse=0.75+0.25*Math.sin(tick*0.18);
-      ctx.save(); ctx.lineCap='round';
-      ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=18*pulse;
-      ctx.lineWidth=12; ctx.globalAlpha=0.92;
-      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
-      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
-      ctx.beginPath(); ctx.arc(this.CX,this.CY,this.R,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
-      ctx.restore();
-    }
-    // ghosts of past strikes
+    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke();
+    // ghosts of past strikes (ellipse-projected)
     this.ghosts.forEach(g2=>{
       ctx.globalAlpha=g2.life*0.5;
       const gp=this.ballPos(g2.a);
@@ -1285,32 +1309,30 @@ const SWINGBALL={
       ctx.beginPath(); ctx.arc(gp.x,gp.y,13,0,Math.PI*2); ctx.stroke();
     });
     ctx.globalAlpha=1;
-    // rope from pole cap to ball, trail, then the ball itself
     const pos=this.ballPos(this.angle);
-    ctx.strokeStyle='rgba(240,230,200,0.5)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(this.CX,this.POLE_TOP-2); ctx.lineTo(pos.x,pos.y); ctx.stroke();
     this.trail.push({x:pos.x,y:pos.y}); if(this.trail.length>12) this.trail.shift();
-    this.trail.forEach((t2,i)=>{
-      const f=i/this.trail.length;
-      ctx.globalAlpha=f*0.30; ctx.fillStyle=p.glow;
-      ctx.beginPath(); ctx.arc(t2.x,t2.y,(5+f*6)/2,0,Math.PI*2); ctx.fill();
-    });
-    ctx.globalAlpha=1;
-    ctx.save(); ctx.translate(pos.x,pos.y);
-    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.beginPath(); ctx.arc(0,0,15,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
-    ctx.shadowBlur=0;
-    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.arc(0,0,15,0,Math.PI*2); ctx.stroke();
-    drawMark(0,0,20,'#f5ece0');
-    ctx.restore();
+    // Depth ordering: far half draws BEHIND the pole, near half in FRONT (passes behind→front).
+    if(!near) this.drawBall();
+    this.drawPole();
+    if(near) this.drawBall();
+    // hit zone + perfect arc — always in front of the pole (floating UI, never occluded)
+    if(this.st==='play'){
+      const pulse=0.75+0.25*Math.sin(tick*0.18);
+      ctx.save(); ctx.lineCap='round';
+      ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=18*pulse;
+      ctx.lineWidth=12; ctx.globalAlpha=0.92;
+      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
+      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
+      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
+      ctx.restore();
+    }
     drawFX();
     if(this.banner){
       const b=this.banner;
       const a2=Math.min(1,b.life*2);
       const scale=1+(1-Math.min(1,b.life*1.6))*0.25;
       ctx.save(); ctx.globalAlpha=a2;
-      ctx.translate(this.CX,this.CY-this.R-42); ctx.scale(scale,scale);
+      ctx.translate(this.CX,this.CY-this.RY-92); ctx.scale(scale,scale);
       ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
       ctx.fillStyle='#fff'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=16;
       ctx.fillText(b.t,0,0);
@@ -1337,7 +1359,7 @@ const SWINGBALL={
       ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26);
     }
     ctx.restore();
-    if(this.st==='ready') drawReadyScreen(p,'SWINGBALL',['TAP WHEN THE BALL CROSSES THE ZONE','CLEAN HITS WIND THE ROPE UP','FILL THE METER TO BANK A LOOP','A WILD SWING SNAPS THE ROPE']);
+    if(this.st==='ready') drawReadyScreen(p,'SWINGBALL',['TAP WHEN THE BALL CROSSES THE ZONE','CLEAN HITS COIL THE ROPE AT THE TOP','FILL THE COIL TO BANK A LOOP','A WILD SWING SNAPS THE ROPE']);
     if(this.st==='over') drawOverScreen(p,'ROPE SNAPPED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'BANKED '+this.loop+' LOOPS');
   },
   tap(){
@@ -1361,14 +1383,16 @@ const SWINGBALL={
 //  NOTE: the spec's spatial "greedy kids drift to dropped lollies" is
 //  deferred — directed throws always connect in v1; per-kid decay carries
 //  the greedy-kid pressure.
+//  Phase 4.5 R1 dial-up: 4 starting kids (0–3), wake-any-kid stage-ups,
+//  faster decay (6.5 / +1.9), 10s stages. par:120 still provisional (may drop).
 // ════════════════════════════════════════════════════════════════
 const SCRAMBLE={
   id:'scramble', name:'SCRAMBLE', tag:'SHARE THE LOLLIES',
   bestKey:'arc_scramble_best',
-  par:120, // PROVISIONAL — retune from play data (set after first playable)
+  par:120, // PROVISIONAL — likely needs lowering after R1; retune from play data
   ranks:[{s:0,t:'FIRST TOSS'},{s:40,t:'LOLLY LOBBER'},{s:100,t:'GALA DAY REGULAR'},{s:200,t:'CROWD PLEASER'},{s:350,t:'FAIR SHARE HERO'},{s:550,t:'PARTY LEGEND'},{s:800,t:'SCRAMBLE SAINT'}],
   KID_Y:532, THROW_X:W/2, THROW_Y:172, MAX_KIDS:5,
-  DECAY_BASE:5.0, DECAY_GROWTH:1.6, STAGE_INTERVAL:12,
+  DECAY_BASE:6.5, DECAY_GROWTH:1.9, STAGE_INTERVAL:10,
   THROW_GAIN:34, SCORE_RATE:5.0,
   FAIR_FLOOR:60, FAIR_BAND:20,
   CRY_TIME:1.4, PITY:42,
@@ -1376,7 +1400,7 @@ const SCRAMBLE={
     const xs=[44,112,180,248,316];
     const cols=['#ff6a8a','#4aa3ff','#ffd24a','#5fe89a','#c89aff'];
     this.kids=xs.map((x,i)=>({
-      x, i, active:(i>=1&&i<=3), haul:(i>=1&&i<=3)?70:0,
+      x, i, active:i<4, haul:i<4?70:0, // R1: start 4 active (indices 0–3)
       decayMul:0.8+srnd(this)*0.6, away:0, bob:Math.random()*Math.PI*2,
       color:cols[i], happy:0,
     }));
@@ -1417,7 +1441,8 @@ const SCRAMBLE={
   stageUp(){
     this.stage++; this.decay+=this.DECAY_GROWTH;
     let woke=false;
-    for(const idx of [0,4]){ if(!this.kids[idx].active){ this.kids[idx].active=true; this.kids[idx].haul=60; woke=true; break; } }
+    const s2=this.kids.find(k=>!k.active); // R1: wake ANY inactive kid (5th arrives at first stage-up)
+    if(s2){ s2.active=true; s2.haul=60; woke=true; }
     this.kids.forEach(k=>{ if(k.active&&k.away<=0) k.haul=Math.min(100,k.haul+16); });
     this.timeScale=0.4;
     this.banner={t:woke?'NEW KID!':'HUNGRIER!',life:1.4};
@@ -1617,16 +1642,19 @@ const SCRAMBLE={
 //  sequence is the level ladder; it loops endlessly, faster, after the top.
 //  Simple parabolic physics, no rotation sim — a horizontal frame-flip
 //  sells the spin (rule 4). Asphalt court is drawn; PALS[5] gives accents.
+//  Phase 4.5 R5 pacing: flat rung speeds (all 1.00), floatier opening toss
+//  (560/700), and speed ramps with TIME only (×1.04/rung-up, extra ×1.04/loop).
 // ════════════════════════════════════════════════════════════════
 const KNUCKLEBONES={
   id:'bones', name:'KNUCKLEBONES', tag:'CATCH THE BONES',
   bestKey:'arc_bones_best',
-  par:90, // PROVISIONAL — retune from play data (set after first playable)
+  par:90, // PROVISIONAL — retune after the R5 pacing change
   LADDER:['ONESIES','TWOSIES','THREESIES','FOURSIES','CLICKS','HORSES IN THE STABLE','OVER THE FENCE'],
-  RUNGS:[{c:1,s:0,spd:1.00},{c:2,s:0,spd:1.05},{c:3,s:0,spd:1.10},{c:4,s:0,spd:1.18},{c:5,s:0,spd:1.28},{c:4,s:1,spd:1.34},{c:3,s:2,spd:1.45}],
+  // R5: rungs vary catch/skip only — speed is uniform 1.00 (time-ramp lives in rungUp()).
+  RUNGS:[{c:1,s:0,spd:1.00},{c:2,s:0,spd:1.00},{c:3,s:0,spd:1.00},{c:4,s:0,spd:1.00},{c:5,s:0,spd:1.00},{c:4,s:1,spd:1.00},{c:3,s:2,spd:1.00}],
   ranks:[{s:0,t:'ONESIES'},{s:14,t:'TWOSIES'},{s:34,t:'THREESIES'},{s:58,t:'FOURSIES'},{s:86,t:'CLICKS'},{s:120,t:'HORSES IN THE STABLE'},{s:150,t:'OVER THE FENCE'}],
   CATCH_LINE:480, SLOTS:[44,110,176,242,308],
-  BASE_LV:660, BASE_G:1000, TOSS_GAP:0.5, CLEARS_PER_RUNG:2, CATCH_R:34,
+  BASE_LV:560, BASE_G:700, TOSS_GAP:0.5, CLEARS_PER_RUNG:2, CATCH_R:34,
   init(){
     this.bones=[];
     this.drops=0; this.score=0; this.catches=0;
@@ -1684,8 +1712,9 @@ const KNUCKLEBONES={
   },
   rungUp(){
     this.tossClears=0;
+    this.baseSpd*=1.04; // R5: time-ramp — every rung-up nudges speed up
     if(this.rung>=this.LADDER.length-1){
-      this.loop++; this.rung=0; this.baseSpd*=1.12;
+      this.loop++; this.rung=0; this.baseSpd*=1.04; // extra bump on loop (≈×1.08 total)
       this.banner={t:'LOOP ×'+this.mult()+'!',life:1.6}; sGold();
     } else {
       this.rung++;
@@ -1816,7 +1845,7 @@ const KNUCKLEBONES={
 // ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // gauntlet order (roadmap §3)
+const GAMES=[STACK,SCAN,CHAIN,SWINGBALL,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence)
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -1839,22 +1868,14 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 //  reads only public fields and never mutates game internals.
 // ════════════════════════════════════════════════════════════════
 const GAUNTLET={
-  id:'gauntlet', name:'GAUNTLET', tag:'EVERY GAME · ONE SCORE',
-  bestKey:'arc_gauntlet_best', isGauntlet:true,
+  // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
   PALMAP:{stack:0,scan:1,chain:2,swing:3,chatter:3,scramble:4,bones:5},
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
-  begin(){
-    this.daily=false; this.locked=false; this.toast=null;
-    this.order=GAMES; this.idx=0; this.total=0; this.results=[];
-    this.best=loadBest(this.bestKey); this.newBest=false;
-    mode='gauntlet'; paused=false;
-    this.launch();
-  },
   beginDaily(){
     const dk=dayKeyOf(new Date());
-    this.daily=true; this.toast=null; this.dayKey=dk;
+    this.toast=null; this.dayKey=dk;
     this.dailyN=dailyNumber();
     this.streak=loadBest('arc_daily_streak');
     let st=null; try{ st=JSON.parse(localStorage.getItem('arc_daily_state')||'null'); }catch(e){}
@@ -1876,8 +1897,7 @@ const GAUNTLET={
   },
   launch(){
     cur=this.order[this.idx];
-    if(this.daily) cur.seed(mulberry32(this.seedBase + this.idx*101)); // per-game deterministic stream
-    else cur.srng=null;                                                // free gauntlet stays live-random
+    cur.seed(mulberry32(this.seedBase + this.idx*101)); // always seeded — daily is the only gauntlet
     cur.init();
     cur.onOver=()=>this.capture();   // game runs its own ready→play→over
     this.state='playing';
@@ -1894,22 +1914,18 @@ const GAUNTLET={
   advance(){ this.idx++; this.launch(); },
   finish(){
     this.state='end'; this.overAt=performance.now();
-    if(this.daily){
-      // streak: +1 if yesterday was completed, else reset to 1
-      const yk=dayKeyOf(new Date(Date.parse(this.dayKey)-86400000));
-      this.streak=(loadStr('arc_daily_lastdone')===yk)?loadBest('arc_daily_streak')+1:1;
-      saveBest('arc_daily_streak',this.streak); saveStr('arc_daily_lastdone',this.dayKey);
-      this.emojiGrid=this.buildEmojiGrid();
-      const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:this.PALMAP[r.id]!=null?this.PALMAP[r.id]:2}));
-      saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
-      sGold(); return;
-    }
-    if(this.total>this.best){ this.best=this.total; this.newBest=true; saveBest(this.bestKey,this.total); refreshMenuBests(); }
-    sGold();
+    // streak: +1 if yesterday was completed, else reset to 1
+    const yk=dayKeyOf(new Date(Date.parse(this.dayKey)-86400000));
+    this.streak=(loadStr('arc_daily_lastdone')===yk)?loadBest('arc_daily_streak')+1:1;
+    saveBest('arc_daily_streak',this.streak); saveStr('arc_daily_lastdone',this.dayKey);
+    this.emojiGrid=this.buildEmojiGrid();
+    const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:this.PALMAP[r.id]!=null?this.PALMAP[r.id]:2}));
+    saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
+    refreshDaily(); sGold(); // refresh the tile's cached daily state
   },
   exit(){
     if(cur){ cur.onOver=null; cur.srng=null; }
-    cur=null; mode='menu'; paused=false; refreshMenuBests();
+    cur=null; mode='menu'; paused=false; refreshMenuBests(); refreshDaily();
   },
   forfeited(){ return this.locked && !this.results.length; },
   buildEmojiGrid(){
@@ -1946,7 +1962,7 @@ const GAUNTLET={
     if(this.state==='playing'&&cur){ cur.render(); this.drawStrip(); }
     else if(this.state==='interstitial') this.drawInterstitial();
     else if(this.state==='sharecard') this.drawSharecard();
-    else if(this.state==='end'){ if(this.daily) this.drawDailyEnd(); else this.drawEnd(); }
+    else if(this.state==='end') this.drawDailyEnd();
   },
   tap(x,y){
     if(this.state==='playing'&&cur){ cur.tap(x,y); return; }
@@ -1954,7 +1970,7 @@ const GAUNTLET={
     if(performance.now()-this.overAt<=450) return; // debounce
     if(this.state==='interstitial'){ this.advance(); return; }
     if(this.state==='end'){
-      if(this.daily && !this.forfeited()){
+      if(!this.forfeited()){
         if(inR(x,y,this.copyRect())){ this.shareGrid(); return; }
         if(inR(x,y,this.shareRect())){ this.shareCard(); return; }
       }
@@ -1964,7 +1980,7 @@ const GAUNTLET={
   drawStrip(){
     ctx.save(); ctx.textAlign='center';
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)';
-    ctx.fillText('GAUNTLET '+(this.idx+1)+'/'+this.order.length+'  ·  '+this.total,W/2,30);
+    ctx.fillText(DAILY_NAME+' '+(this.idx+1)+'/'+this.order.length+'  ·  '+this.total,W/2,30);
     ctx.restore();
   },
   drawBars(results,y0,rowH,withRank){
@@ -1993,22 +2009,6 @@ const GAUNTLET={
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('NEXT  ·  '+this.order[this.idx+1].name,W/2,H-70);
     ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
     ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP TO CONTINUE',W/2,H-44);
-    ctx.globalAlpha=1;
-  },
-  drawEnd(){
-    const p=PALS[2]; drawBG(p); drawFX();
-    ctx.textAlign='center';
-    ctx.font='12px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=14; ctx.fillText('GAUNTLET COMPLETE',W/2,56); ctx.shadowBlur=0;
-    ctx.font='34px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=18; ctx.fillText(this.total,W/2,102); ctx.shadowBlur=0;
-    if(this.newBest){
-      ctx.globalAlpha=0.6+0.4*Math.sin(tick*0.14);
-      ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=12; ctx.fillText('★ NEW BEST! ★',W/2,126); ctx.shadowBlur=0; ctx.globalAlpha=1;
-    } else {
-      ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('BEST '+this.best,W/2,126);
-    }
-    this.drawBars(this.results,166,34,true);
-    ctx.textAlign='center'; ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
-    ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP FOR MENU',W/2,H-38);
     ctx.globalAlpha=1;
   },
   drawDailyEnd(){
@@ -2048,28 +2048,35 @@ const GAUNTLET={
     if(this.cardCapture){ this.cardCapture=false; this.tryShareCanvas(); }
   },
 };
-// Menu shows the GAUNTLET card first, then the seven games.
-const MENU_ITEMS=[GAUNTLET,...GAMES];
 
 // Menu bests are cached on menu entry, not re-read from localStorage per card per frame.
 let menuBests={};
 function refreshMenuBests(){
-  MENU_ITEMS.forEach(g=>{
+  GAMES.forEach(g=>{
     menuBests[g.id]=loadBest(g.bestKey, g.id==='stack'?'cps2_best':(g.id==='chain'?'chain_best':null));
   });
 }
-refreshMenuBests();
+// Cached daily state for the page-0 tile (avoids parsing arc_daily_state every frame).
+let dailyCache={played:false,total:0,forfeited:false,streak:0};
+function refreshDaily(){
+  let st=null; try{ st=JSON.parse(localStorage.getItem('arc_daily_state')||'null'); }catch(e){}
+  const today=st&&st.dayKey===dayKeyOf(new Date())&&st.played;
+  dailyCache={ played:!!today, total:today?(st.total||0):0,
+    forfeited:!!(today&&!(st.result&&st.result.length)), streak:loadBest('arc_daily_streak') };
+}
+refreshMenuBests(); refreshDaily();
 
-// Paginated 2×2 card list — identical card language, scales past four games.
+// Paginated menu (Phase 4.5 R3): page 0 = full-page TUCK SHOP RUN tile; game cards from page 1.
 const PER_PAGE=4;
-function menuPageCount(){ return Math.ceil(MENU_ITEMS.length/PER_PAGE); }
+function menuPageCount(){ return 1+Math.ceil(GAMES.length/PER_PAGE); }
 function menuCards(){
-  const cw=158, chh=150, gx=15, gy=222, gapX=14, gapY=14;
-  const start=menuPage*PER_PAGE;
+  if(menuPage===0) return []; // page 0 is the daily tile only
+  const cw=158, chh=164, gx=15, gy=190, gapX=14, gapY=16;
+  const start=(menuPage-1)*PER_PAGE;
   const cards=[];
-  for(let i=start;i<Math.min(start+PER_PAGE,MENU_ITEMS.length);i++){
+  for(let i=start;i<Math.min(start+PER_PAGE,GAMES.length);i++){
     const j=i-start;
-    cards.push({g:MENU_ITEMS[i], x:gx+(j%2)*(cw+gapX), y:gy+Math.floor(j/2)*(chh+gapY), w:cw, h:chh});
+    cards.push({g:GAMES[i], x:gx+(j%2)*(cw+gapX), y:gy+Math.floor(j/2)*(chh+gapY), w:cw, h:chh});
   }
   return cards;
 }
@@ -2092,18 +2099,9 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5],gauntlet:PALS[5]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
-  if(g.id==='gauntlet'){
-    // seven palette chips (every game) beneath one gold mark (one score)
-    const rings=[PALS[0].ring,PALS[1].ring,PALS[2].ring,PALS[3].ring,PALS[4].ring,PALS[5].ring,'#ff9a3a'];
-    rings.forEach((col,i)=>{
-      const rowN=i<4?4:3, colN=i<4?i:i-4, row=i<4?0:1;
-      const cx2=(colN-(rowN-1)/2)*13, cy2=8+row*13;
-      rr(cx2-5,cy2-5,10,10,3); ctx.fillStyle=col; ctx.fill();
-    });
-    drawMark(0,-16,20,'#ffd24a');
-  } else if(g.id==='stack'){
+  if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
       rr(b[0]-1,b[1]-1,b[2]+2,13,5); ctx.fillStyle='#140a08'; ctx.fill();
       rr(b[0],b[1],b[2],11,4); ctx.fillStyle=PALS[0].acc; ctx.fill();
@@ -2176,22 +2174,38 @@ function drawMenuIcon(g,cx,cy){
   }
   ctx.restore();
 }
-function dailyBannerRect(){ return {x:15,y:168,w:W-30,h:42}; }
-function drawDailyBanner(){
-  const r=dailyBannerRect(), played=dailyPlayedToday();
+// Page-0 full-page daily tile (R3) — gold, pulsing border, drawn mark chip (rule 4).
+function dailyTileRect(){ return {x:15,y:172,w:W-30,h:344}; }
+function drawDailyTile(){
+  const r=dailyTileRect(), cx=W/2;
   const g=ctx.createLinearGradient(r.x,r.y,r.x,r.y+r.h);
-  g.addColorStop(0,PALS[5].acc+'44'); g.addColorStop(1,'#0c0c14');
-  rr(r.x,r.y,r.w,r.h,10); ctx.fillStyle=g; ctx.fill();
-  ctx.strokeStyle=PALS[5].ring; ctx.lineWidth=2; ctx.globalAlpha=0.75+0.25*Math.sin(tick*0.06); rr(r.x,r.y,r.w,r.h,10); ctx.stroke(); ctx.globalAlpha=1;
-  drawMark(r.x+26,r.y+r.h/2,22,'#ffd24a');
-  ctx.textAlign='left';
-  ctx.font='9px "Press Start 2P"'; ctx.fillStyle=PALS[5].ring; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=6;
-  ctx.fillText(DAILY_NAME,r.x+48,r.y+19); ctx.shadowBlur=0;
-  ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)';
-  ctx.fillText('DAILY #'+dailyNumber()+(played?'  ·  DONE':'  ·  ONE ATTEMPT'),r.x+48,r.y+32);
-  ctx.textAlign='right'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
-  ctx.fillText(played?('STREAK '+loadBest('arc_daily_streak')):'► PLAY',r.x+r.w-14,r.y+r.h/2+3);
+  g.addColorStop(0,PALS[5].acc+'2e'); g.addColorStop(1,'#0c0c14');
+  rr(r.x,r.y,r.w,r.h,16); ctx.fillStyle=g; ctx.fill();
+  ctx.save(); ctx.strokeStyle=PALS[5].ring; ctx.lineWidth=2.5; ctx.globalAlpha=0.7+0.3*Math.sin(tick*0.06);
+  ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=12; rr(r.x,r.y,r.w,r.h,16); ctx.stroke(); ctx.restore();
+  ctx.save(); ctx.translate(cx,r.y+58); ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=18;
+  rr(-28,-28,56,56,13); ctx.fillStyle='#e85d15'; ctx.fill(); ctx.shadowBlur=0; drawMark(0,1,40,'#f5ece0'); ctx.restore();
   ctx.textAlign='center';
+  ctx.font='15px "Press Start 2P"'; ctx.fillStyle=PALS[5].ring; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=10;
+  ctx.fillText(DAILY_NAME,cx,r.y+120); ctx.shadowBlur=0;
+  ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('DAILY #'+dailyNumber(),cx,r.y+142);
+  ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.fillText('EVERY GAME · ONE SCORE',cx,r.y+170);
+  ctx.fillText('ONE ATTEMPT A DAY',cx,r.y+186);
+  if(dailyCache.forfeited){
+    ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ff6a8a'; ctx.fillText('ATTEMPT USED',cx,r.y+240);
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('COME BACK TOMORROW',cx,r.y+262);
+  } else if(dailyCache.played){
+    ctx.font='9px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillText('TODAY',cx,r.y+224);
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=12; ctx.fillText(dailyCache.total,cx,r.y+256); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+dailyCache.streak,cx,r.y+278);
+    ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
+    ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP TO VIEW RESULT',cx,r.y+r.h-26); ctx.globalAlpha=1;
+  } else {
+    if(dailyCache.streak>0){ ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+dailyCache.streak,cx,r.y+236); }
+    ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
+    ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP TO PLAY',cx,r.y+r.h-26); ctx.globalAlpha=1;
+  }
 }
 function drawMenu(){
   drawBG(PALS[2]);
@@ -2209,10 +2223,10 @@ function drawMenu(){
   ctx.shadowBlur=0;
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
   ctx.fillText('SEVEN QUICK GAMES \u00b7 ONE THUMB',W/2,158);
-  drawDailyBanner();
+  if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5],gauntlet:PALS[5]}[g.id];
+    const p={stack:PALS[0],scan:PALS[1],chain:PALS[2],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
@@ -2299,7 +2313,7 @@ function onDown(e){
   const {x,y}=getXY(e);
   if(inR(x,y,muteRect())){ mute=!mute; try{ localStorage.setItem('arc_mute',mute?'1':'0'); }catch(err){} return; }
   if(mode==='game'){
-    if(inR(x,y,homeRect())){ mode='menu'; cur.init(); cur=null; paused=false; refreshMenuBests(); return; }
+    if(inR(x,y,homeRect())){ mode='menu'; cur.init(); cur=null; paused=false; refreshMenuBests(); refreshDaily(); return; }
     if(paused){ paused=false; return; } // consume the resume tap
     cur.tap(x,y);
     return;
@@ -2329,10 +2343,9 @@ function onUp(e){
   if(nav.left&&inR(x,y,nav.left)){ menuPage--; sTick(0.02); return; }
   if(nav.right&&inR(x,y,nav.right)){ menuPage++; sTick(0.02); return; }
   for(const d of nav.dots){ if(Math.hypot(x-d.x,y-d.y)<=d.r){ menuPage=d.page; sTick(0.02); return; } }
-  if(inR(x,y,dailyBannerRect())){ GAUNTLET.beginDaily(); sHit(); return; }
+  if(menuPage===0){ if(inR(x,y,dailyTileRect())){ GAUNTLET.beginDaily(); sHit(); } return; } // page 0 = daily tile
   for(const card of menuCards()){
     if(x>=card.x&&x<=card.x+card.w&&y>=card.y&&y<=card.y+card.h){
-      if(card.g.isGauntlet){ GAUNTLET.begin(); sHit(); return; }
       cur=card.g; cur.onOver=null; cur.srng=null; cur.init(); mode='game'; paused=false; sHit(); return;
     }
   }
