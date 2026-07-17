@@ -2285,7 +2285,7 @@ function drawMenu(){
   if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id];
+    const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
