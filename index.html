@@ -25,8 +25,9 @@ canvas { display:block; cursor:pointer; touch-action:none; }
 <script>
 'use strict';
 // ════════════════════════════════════════════════════════════════
-//  CENTRARCADE — six quick games + the TUCK SHOP RUN daily, one thumb.
-//  STACK · SCAN · SWINGBALL · CHATTER · SCRAMBLE · KNUCKLEBONES   (shared 16-bit engine)
+//  CENTRARCADE — eleven quick games + the TUCK SHOP RUN daily, one thumb.
+//  STACK · SCAN · HOWLER · SWINGBALL · GUNGE · CHATTER · TAZO ·
+//  SCRAMBLE · DAIRY · KNUCKLEBONES · WEAVER   (shared 16-bit engine)
 // ════════════════════════════════════════════════════════════════
 const c=document.getElementById('c');
 const ctx=c.getContext('2d');
@@ -78,6 +79,17 @@ function segDist(px,py,ax,ay,bx,by){
   let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;
   t=t<0?0:t>1?1:t;
   return Math.hypot(px-(ax+dx*t),py-(ay+dy*t));
+}
+// Do segments A-B and C-D properly cross? (Strict orientation test: a shared
+// endpoint does NOT count, so consecutive thread segments never self-report.)
+// segDist can't decide this — point-to-segment distance is the wrong primitive
+// for two thin segments crossing — hence this sibling helper (WEAVER's thread
+// self-crossing test; segDist stays the hazard-vs-thread primitive).
+function segsCross(ax,ay,bx,by,cx,cy,dx,dy){
+  const o=(px,py,qx,qy,rx,ry)=>(qx-px)*(ry-py)-(qy-py)*(rx-px);
+  const o1=o(ax,ay,bx,by,cx,cy), o2=o(ax,ay,bx,by,dx,dy);
+  const o3=o(cx,cy,dx,dy,ax,ay), o4=o(cx,cy,dx,dy,bx,by);
+  return o1*o2<0 && o3*o4<0;
 }
 function rr(x,y,w,h,r){
   r=Math.min(r,w/2,h/2);
@@ -2629,16 +2641,366 @@ const DAIRY={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME: WEAVER  (Phase 5.5, Unit 7 — the last Phase 5 game)
+//  1995 America's Cup red socks. Verb: CONTINUOUS DRAG — the only
+//  full pointer-stream consumer (press+drag+release all live, D12).
+//  Weave the red thread through EVERY knot exactly once, following
+//  the ropes, never crossing yourself, dodging spy boats + flares.
+//
+//  D16 — the graph is generated correct-by-construction, never
+//  generate-and-hope: "visit every node once" is a HAMILTONIAN PATH,
+//  which is NP-hard to find in a random graph and would produce
+//  impossible daily boards. So genBoard() INVERTS the problem: carve
+//  a random simple path on a virtual 4×4 grid first (randomised DFS
+//  with backtracking — same generator DNA as GUNGE's carve()), then
+//  let the CARVED CELLS BECOME THE KNOTS. The carve order is then a
+//  Hamiltonian path over the knot set by definition. Decoy ropes are
+//  added AFTER, between grid-adjacent knots that aren't consecutive
+//  on the carve — legal to follow, and the trap. Because consecutive
+//  carve cells are grid-adjacent and jitter is bounded below half a
+//  cell, the solution path can never geometrically self-cross, so
+//  the no-cross rule can't invalidate the intended solution either.
+//
+//  Thread moves are EDGE-CONSTRAINED (a rope must exist) and the
+//  thread may only START on one of the two carved endpoints (the red
+//  bollards) — the Hamiltonian guarantee holds from the endpoints
+//  ONLY; a free-start could strand the player on a provably
+//  unwinnable attempt, which would break D16's spirit.
+//
+//  Lives are HAZARD-ONLY (§5.5): boat/flare contact snaps the thread
+//  = 1 life, 3 lives = over (D14). Everything else is free (§8):
+//  pressing off a bollard, a blocked rope, releasing an unfinished
+//  weave (it just unravels — retry the same board), dragging back
+//  onto the previous knot (unwinds one step). The per-board clock is
+//  a BONUS METER only (GUNGE precedent, D3): completion banks the
+//  remainder, hitting 0 never costs anything — the board stays
+//  finishable for base points.
+//
+//  Self-crossing uses segsCross (proper seg-seg orientation test —
+//  segDist is the wrong primitive for that); hazard-vs-thread uses
+//  segDist exactly as §3 intends. pointercancel routes through the
+//  router to release(), which unconditionally nulls the thread — an
+//  abandoned drag can never hang a weave (§3). Seeded via srnd():
+//  carve, jitter, decoys, boat routes, flare routes — Nth-draw order
+//  is deterministic (HOWLER precedent), drag physics stay live.
+//  (Section labels track FILE order, not the daily order — §7.)
+// ════════════════════════════════════════════════════════════════
+const WEAVER={
+  id:'weaver', name:'WEAVER', tag:'WEAVE THE RED THREAD',
+  bestKey:'arc_weaver_best',
+  // par PROVISIONAL & SIM-INFORMED (no human play). A modelled player (solve time
+  // ~L·1.1s+2s/attempt, snap chance 0.10+0.045/stage) over 4000 runs: score
+  // p10/p50/p90 ≈ 310/1000/2600, median run ≈2.6 min, median stage 7. The spec's
+  // par:200 would peg the 625 normaliser cap for anyone reaching stage 4 (the
+  // GUNGE/TAZO/DAIRY par lesson, applied up front); par:1000 lands the modelled
+  // median at ≈250 normalised with only p90+ runs touching the cap. The player
+  // model is a guess — flip CALIBRATE on to log real runs and retune (§7).
+  par:1000, // PROVISIONAL
+  ranks:[{s:0,t:'SOCK KNITTER'},{s:120,t:'DECKHAND'},{s:400,t:'TACTICIAN'},{s:900,t:'HELMSMAN'},{s:1800,t:'CUP HOLDER'}], // PROVISIONAL
+  CALIBRATE:false,      // flip on → log score/stage/knits/seconds per run (par retune data, §7)
+  GX:30, GY:168, GRID_PX:300, GN:4,   // virtual 4×4 grid, 75px cells, board box 300×300
+  BASE_NODES:7, MAX_NODES:14,         // knots per board: 7 + stage, capped — PROVISIONAL
+  DECOY_BASE:2, DECOY_MAX:6,          // decoy ropes: 2 + stage, capped — PROVISIONAL
+  // Snap geometry: cell 75 ≥ 2·SNAP_R + 2·JITTER = 72, so snap circles of
+  // neighbouring knots can NEVER overlap (min knot spacing 75−2·12 = 51 > 48).
+  // Widen SNAP_R or JITTER only together with this inequality.
+  SNAP_R:24, JITTER:12,
+  THREAD_W:3.5,
+  TIME_BASE:30, TIME_STEP:1.5, TIME_FLOOR:14, // bonus meter only — never ends anything (D3) — PROVISIONAL
+  NODE_PTS:3, TIME_RATE:1,            // gained = knots·NODE_PTS·(stage+1) + remaining·TIME_RATE — PROVISIONAL
+  BOAT_SPD:52, BOAT_SPD_STEP:6, BOAT_R:11,          // px/s along the patrol box — PROVISIONAL
+  FLARE_PERIOD:7, FLARE_PERIOD_MIN:3.5, FLARE_T:1.6, FLARE_R:9, // PROVISIONAL
+  pal(){ return PALS[9]; }, // navy hull + red-sock accent (hues PROVISIONAL, §3/§7)
+  stageTime(){ return Math.max(this.TIME_FLOOR, this.TIME_BASE-this.stage*this.TIME_STEP); },
+  flarePeriod(){ return Math.max(this.FLARE_PERIOD_MIN, this.FLARE_PERIOD-this.stage*0.5); },
+  init(){
+    this.score=0; this.best=loadBest(this.bestKey); this.newBest=false;
+    this.lives=3; this.stage=0; this.knits=0; this.runT=0;
+    this.thread=null; this.px=0; this.py=0;
+    this.shake=0; this.banner=null; this.rejectAt=0;
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.genBoard();
+  },
+  start(){ this.st='play'; },
+  // ── D16 generation: Hamiltonian path FIRST, knots FROM the path ──
+  carve(L){ // random simple path of exactly L cells on the GN×GN grid
+    const N=this.GN, total=N*N, self=this;
+    const first=Math.floor(srnd(this)*total);
+    for(let s0=0;s0<total;s0++){ // fallback starts, deterministic order — carve can't fail
+      const seen=new Array(total).fill(false), path=[];
+      function dfs(idx){
+        seen[idx]=true; path.push(idx);
+        if(path.length===L) return true;
+        const c=idx%N, r=(idx/N)|0, ds=[[0,-1],[1,0],[0,1],[-1,0]];
+        for(let i=ds.length-1;i>0;i--){ const j=Math.floor(srnd(self)*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
+        for(const [dc,dr] of ds){ const nc=c+dc, nr=r+dr;
+          if(nc<0||nc>=N||nr<0||nr>=N) continue;
+          const n=nr*N+nc; if(!seen[n]&&dfs(n)) return true; }
+        path.pop(); seen[idx]=false; return false;
+      }
+      if(dfs((first+s0)%total)) return path;
+    }
+    return [first]; // unreachable for L ≤ MAX_NODES ≤ 14 on a 4×4 grid; keeps the contract total
+  },
+  genBoard(){
+    const L=Math.min(this.MAX_NODES,this.BASE_NODES+this.stage);
+    const cells=this.carve(L), N=this.GN, cs=this.GRID_PX/N;
+    this.nodes=cells.map(idx=>({
+      x:this.GX+(idx%N)*cs+cs/2+(srnd(this)*2-1)*this.JITTER,
+      y:this.GY+((idx/N)|0)*cs+cs/2+(srnd(this)*2-1)*this.JITTER,
+      cell:idx }));
+    // ropes: the true path (i,i+1) + seeded decoys (grid-adjacent, NOT consecutive)
+    this.adj=this.nodes.map(()=>[]);
+    const addE=(a,b)=>{ this.adj[a].push(b); this.adj[b].push(a); };
+    for(let i=0;i<L-1;i++) addE(i,i+1);
+    const cand=[];
+    for(let i=0;i<L;i++) for(let j=i+2;j<L;j++){
+      const a=this.nodes[i].cell, b=this.nodes[j].cell;
+      if(Math.max(Math.abs(a%N-b%N),Math.abs(((a/N)|0)-((b/N)|0)))===1) cand.push([i,j]);
+    }
+    for(let i=cand.length-1;i>0;i--){ const j=Math.floor(srnd(this)*(i+1)); const t=cand[i]; cand[i]=cand[j]; cand[j]=t; }
+    const nd=Math.min(cand.length, Math.min(this.DECOY_MAX,this.DECOY_BASE+this.stage));
+    for(let k=0;k<nd;k++) addE(cand[k][0],cand[k][1]);
+    this.ends=[0,L-1]; // the ONLY legal thread starts — the Hamiltonian guarantee holds from these
+    this.thread=null;
+    this.timeLeft=this.stageTime();
+    this.rollBoats(); this.flare=null; this.flareT=this.flarePeriod()*0.6;
+  },
+  rollBoats(){
+    const n=Math.min(3,1+(this.stage>=2?1:0)+(this.stage>=5?1:0));
+    this.boats=[];
+    for(let i=0;i<n;i++){
+      const w=110+srnd(this)*140, h=90+srnd(this)*140; // patrol box never degenerate — a tight loop would camp a knot
+      this.boats.push({ x:this.GX+srnd(this)*(this.GRID_PX-w), y:this.GY+srnd(this)*(this.GRID_PX-h),
+        w,h, t:srnd(this), dir:srnd(this)<0.5?1:-1, spd:this.BOAT_SPD+this.stage*this.BOAT_SPD_STEP });
+    }
+  },
+  boatPos(b){ // position + heading along the patrol-box perimeter
+    const per=2*(b.w+b.h); let d=(((b.t%1)+1)%1)*per;
+    let p;
+    if(d<b.w) p={x:b.x+d,y:b.y,a:0};
+    else if((d-=b.w)<b.h) p={x:b.x+b.w,y:b.y+d,a:Math.PI/2};
+    else if((d-=b.h)<b.w) p={x:b.x+b.w-d,y:b.y+b.h,a:Math.PI};
+    else { d-=b.w; p={x:b.x,y:b.y+b.h-d,a:-Math.PI/2}; }
+    if(b.dir<0) p.a+=Math.PI;
+    return p;
+  },
+  spawnFlare(){ // arcs across the board top↔bottom; Nth-flare route is seeded (HOWLER Nth-draw precedent)
+    const fromTop=srnd(this)<0.5;
+    this.flare={ t:0, dur:this.FLARE_T,
+      x0:this.GX+srnd(this)*this.GRID_PX, x1:this.GX+srnd(this)*this.GRID_PX,
+      y0:fromTop?this.GY-14:this.GY+this.GRID_PX+14,
+      y1:fromTop?this.GY+this.GRID_PX+14:this.GY-14 };
+  },
+  flarePos(f){ const u=f.t/f.dur; return {x:f.x0+(f.x1-f.x0)*u, y:f.y0+(f.y1-f.y0)*u-Math.sin(Math.PI*u)*46}; },
+  // ── pointer stream (D12) — press+drag+release, the full contract ──
+  press(x,y){
+    this.px=x; this.py=y;
+    for(const e of this.ends){ const n=this.nodes[e];
+      if(Math.hypot(x-n.x,y-n.y)<this.SNAP_R){
+        this.thread={order:[e], visited:new Array(this.nodes.length).fill(false)};
+        this.thread.visited[e]=true; sTick(0.05); buzz(6); return;
+      }
+    }
+    this.rejectAt=performance.now(); // off-bollard press = free no-op (§8)
+  },
+  drag(x,y){
+    this.px=x; this.py=y;
+    const th=this.thread; if(!th) return;
+    const cur=th.order[th.order.length-1];
+    if(th.order.length>1){ // unwind: dragging back onto the previous knot pops a step
+      const pn=this.nodes[th.order[th.order.length-2]];
+      if(Math.hypot(x-pn.x,y-pn.y)<this.SNAP_R){ th.visited[cur]=false; th.order.pop(); sTick(0.02); return; }
+    }
+    for(const nb of this.adj[cur]){
+      if(th.visited[nb]) continue;
+      const n=this.nodes[nb];
+      if(Math.hypot(x-n.x,y-n.y)>=this.SNAP_R) continue;
+      if(this.crossesThread(cur,nb)){ this.rejectAt=performance.now(); continue; } // blocked rope = free (§8), visual only
+      th.order.push(nb); th.visited[nb]=true; sTick(0.05); buzz(4);
+      if(th.order.length===this.nodes.length) this.complete();
+      return;
+    }
+  },
+  release(){
+    // ALWAYS terminates the gesture — pointercancel lands here via the router
+    // (§3: an abandoned drag must never hang a weave). An unfinished thread
+    // unravels as a FREE retry on the same board (§8: lives are hazard-only).
+    if(this.thread) sTick(0.02);
+    this.thread=null;
+  },
+  crossesThread(a,b){ // would knot a → knot b cross any committed segment?
+    const th=this.thread, A=this.nodes[a], B=this.nodes[b];
+    for(let i=0;i<th.order.length-2;i++){ // skip the last segment — it shares knot a
+      const P=this.nodes[th.order[i]], Q=this.nodes[th.order[i+1]];
+      if(segsCross(A.x,A.y,B.x,B.y,P.x,P.y,Q.x,Q.y)) return true;
+    }
+    return false;
+  },
+  threadSegs(){ // committed segments + the live rubber-band to the pointer
+    const th=this.thread, out=[];
+    for(let i=0;i<th.order.length-1;i++){ const a=this.nodes[th.order[i]], b=this.nodes[th.order[i+1]]; out.push([a.x,a.y,b.x,b.y]); }
+    const c0=this.nodes[th.order[th.order.length-1]];
+    out.push([c0.x,c0.y,this.px,this.py]);
+    return out;
+  },
+  complete(){
+    this.thread=null;
+    const gained=this.nodes.length*this.NODE_PTS*(this.stage+1)+Math.round(this.timeLeft)*this.TIME_RATE;
+    this.score+=gained; this.knits++;
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+    const n=this.nodes[this.nodes.length-1];
+    burst(n.x,n.y,this.pal().glow,18,4); burst(n.x,n.y,'#ffd2d8',8,2.6);
+    pop('+'+gained,n.x,n.y-20,this.pal().ring,8);
+    sGold(); buzz(20); this.shake=6; this.banner={t:'KNITTED!',life:1.3};
+    if(this.CALIBRATE) console.log('WEAVER knit: stage='+(this.stage+1)+' gained='+gained+' left='+this.timeLeft.toFixed(1));
+    this.stage++; this.genBoard();
+  },
+  snap(hx,hy){ // hazard contact: the thread snaps = 1 life (§5.5)
+    this.thread=null; this.lives--;
+    burst(hx,hy,'#ff4458',16,3.6); pop('SNAPPED!',hx,hy-16,this.pal().ring,8);
+    sBad(); buzz(50); this.shake=8; this.banner={t:'THREAD SNAPPED!',life:1.3};
+    if(this.lives<=0) this.gameOver();
+  },
+  gameOver(){
+    this.st='over'; this.overAt=performance.now(); this.thread=null;
+    if(this.CALIBRATE) console.log('WEAVER run: score='+this.score+' stage='+(this.stage+1)+' knits='+this.knits+' t='+this.runT.toFixed(1)+'s');
+    if(this.onOver) this.onOver();
+  },
+  update(dt){
+    this.shake*=0.82;
+    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+    if(this.st!=='play') return;
+    this.runT+=dt;
+    this.timeLeft=Math.max(0,this.timeLeft-dt); // bonus drains to 0 and stops — no penalty (D3)
+    for(const b of this.boats){ b.t+=b.dir*b.spd*dt/(2*(b.w+b.h)); }
+    if(this.flare){ this.flare.t+=dt; if(this.flare.t>=this.flare.dur) this.flare=null; }
+    else { this.flareT-=dt; if(this.flareT<=0){ this.spawnFlare(); this.flareT=this.flarePeriod(); } }
+    if(this.thread){ // hazards only threaten a LIVE thread — timing the weave is the game
+      const pts=this.boats.map(b=>{ const p=this.boatPos(b); p.r=this.BOAT_R; return p; });
+      if(this.flare){ const p=this.flarePos(this.flare); p.r=this.FLARE_R; pts.push(p); }
+      const segs=this.threadSegs();
+      for(const p of pts) for(const s of segs){
+        if(segDist(p.x,p.y,s[0],s[1],s[2],s[3])<p.r+this.THREAD_W){ this.snap(p.x,p.y); return; }
+      }
+    }
+  },
+  // ── drawing ──
+  drawBoat(b){
+    const p=this.boatPos(b);
+    ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.a);
+    ctx.fillStyle='#101820'; // hull, bow forward (+x)
+    ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(4,5); ctx.lineTo(-10,5); ctx.lineTo(-12,0); ctx.lineTo(-10,-5); ctx.lineTo(4,-5); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.85)'; // spy sail
+    ctx.beginPath(); ctx.moveTo(-1,-4); ctx.lineTo(7,-4); ctx.lineTo(-1,-14); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  },
+  drawFlare(f){
+    const p=this.flarePos(f);
+    ctx.save(); ctx.shadowColor='#ffcc44'; ctx.shadowBlur=12;
+    for(let i=1;i<=3;i++){ const u=Math.max(0,f.t-i*0.05)/f.dur; // short trail
+      const tx=f.x0+(f.x1-f.x0)*u, ty=f.y0+(f.y1-f.y0)*u-Math.sin(Math.PI*u)*46;
+      ctx.globalAlpha=0.5-i*0.13; ctx.fillStyle='#ff9a30'; ctx.beginPath(); ctx.arc(tx,ty,4-i,0,Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha=1; ctx.fillStyle='#ffe28a'; ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18; // lives as tiny red socks (rule 4)
+      ctx.fillStyle=p.acc; rr(lx-4,104,8,10,2); ctx.fill(); rr(lx-4,111,11,5,2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.7)'; rr(lx-4,104,8,3,1); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('STAGE '+(this.stage+1),W/2,130);
+    // bonus clock (a bonus meter, not a cap — D3)
+    const bx=44, bw=W-88, frac=Math.max(0,Math.min(1,this.timeLeft/this.stageTime()));
+    rr(bx-1,137,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    ctx.fillStyle=frac<0.25?'rgba(255,255,255,0.35)':p.ring;
+    rr(bx,138,Math.max(0,bw*frac),6,2); ctx.fill();
+    // water shimmer inside the course
+    ctx.save(); ctx.strokeStyle='rgba(120,180,255,0.07)'; ctx.lineWidth=2;
+    for(let i=0;i<5;i++){ const wy=this.GY+30+i*58; ctx.beginPath();
+      for(let x=this.GX;x<=this.GX+this.GRID_PX;x+=20) ctx.lineTo(x,wy+Math.sin(tick*0.03+i*1.7+x*0.05)*3);
+      ctx.stroke(); }
+    ctx.restore();
+    // ropes (path + decoys drawn identically — telegraphing the carve would kill the puzzle)
+    ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=2; ctx.lineCap='round';
+    for(let a=0;a<this.adj.length;a++) for(const b of this.adj[a]) if(b>a){
+      const A=this.nodes[a], B=this.nodes[b];
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+    }
+    // thread (committed + live rubber-band)
+    const th=this.thread;
+    if(th){
+      ctx.save(); ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=10;
+      ctx.lineWidth=this.THREAD_W; ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.beginPath();
+      th.order.forEach((ni,i)=>{ const n=this.nodes[ni]; if(i===0) ctx.moveTo(n.x,n.y); else ctx.lineTo(n.x,n.y); });
+      ctx.stroke();
+      ctx.globalAlpha=0.55; ctx.beginPath();
+      const c0=this.nodes[th.order[th.order.length-1]];
+      ctx.moveTo(c0.x,c0.y); ctx.lineTo(this.px,this.py); ctx.stroke();
+      ctx.restore();
+    }
+    // knots (drawn, rule 4): cleat discs; bollard endpoints in red; visited fill
+    this.nodes.forEach((n,i)=>{
+      const isEnd=i===this.ends[0]||i===this.ends[1];
+      const vis=th&&th.visited[i], cur=th&&i===th.order[th.order.length-1];
+      ctx.beginPath(); ctx.arc(n.x,n.y,isEnd?10:8,0,Math.PI*2); ctx.fillStyle='#060d18'; ctx.fill();
+      ctx.save();
+      if(cur){ ctx.shadowColor=p.glow; ctx.shadowBlur=12; }
+      else if(isEnd&&!th){ ctx.shadowColor=p.glow; ctx.shadowBlur=6+4*Math.sin(tick*0.08); }
+      ctx.beginPath(); ctx.arc(n.x,n.y,isEnd?7:5.5,0,Math.PI*2);
+      ctx.fillStyle=vis?p.acc:(isEnd?p.ring:'#3a4d68'); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.2;
+      ctx.beginPath(); ctx.arc(n.x,n.y,isEnd?7:5.5,0,Math.PI*2); ctx.stroke();
+    });
+    // hazards
+    this.boats.forEach(b=>this.drawBoat(b));
+    if(this.flare) this.drawFlare(this.flare);
+    drawFX();
+    // progress + reject flash + banner
+    if(th){ ctx.textAlign='center'; ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)';
+      ctx.fillText(th.order.length+' / '+this.nodes.length+' KNOTS',W/2,this.GY+this.GRID_PX+24); }
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='11px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,160); ctx.restore(); }
+    // rank
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'WEAVER',['DRAG FROM A RED BOLLARD','THREAD EVERY KNOT ONCE','FOLLOW ROPES · NEVER CROSS','DODGE SPY BOATS AND FLARES']);
+    if(this.st==='over') drawOverScreen(p,'THE THREAD SNAPPED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1)+' · KNITS '+this.knits);
+  },
+  tap(){ // gameplay never routes here (press defined, D12) — ready/over only
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'&&performance.now()-this.overAt>450){ this.init(); this.start(); }
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER, DAIRY after SCRAMBLE
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER, DAIRY after SCRAMBLE, WEAVER last
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
@@ -2990,6 +3352,21 @@ function drawMenuIcon(g,cx,cy){
     ctx.beginPath(); ctx.moveTo(-5,5); ctx.lineTo(5,11); ctx.moveTo(-5,11); ctx.lineTo(5,5); ctx.stroke();
     for(let i=0;i<3;i++){ ctx.strokeStyle=s.glow+'aa'; ctx.lineWidth=1.5; ctx.beginPath(); // heat wisps
       ctx.moveTo(-8+i*8,-8); ctx.quadraticCurveTo(-5+i*8,-12,-8+i*8,-16); ctx.stroke(); }
+  } else if(g.id==='weaver'){
+    // a knot graph mid-weave: faint ropes, the red thread through half of it (rule 4)
+    const s=PALS[9];
+    const kn=[[-16,-14],[8,-18],[16,0],[-4,6],[-18,12],[12,16]];
+    ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.5; ctx.lineCap='round';
+    [[0,1],[1,2],[2,3],[3,4],[0,3],[1,3],[4,5],[2,5],[3,5]].forEach(e=>{
+      ctx.beginPath(); ctx.moveTo(kn[e[0]][0],kn[e[0]][1]); ctx.lineTo(kn[e[1]][0],kn[e[1]][1]); ctx.stroke(); });
+    ctx.save(); ctx.strokeStyle=s.glow; ctx.shadowColor=s.glow; ctx.shadowBlur=8; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(kn[0][0],kn[0][1]); ctx.lineTo(kn[1][0],kn[1][1]); ctx.lineTo(kn[3][0],kn[3][1]); ctx.lineTo(kn[4][0],kn[4][1]); ctx.stroke(); ctx.restore();
+    kn.forEach((k,i)=>{
+      ctx.beginPath(); ctx.arc(k[0],k[1],i===0?5.5:4.5,0,Math.PI*2); ctx.fillStyle='#060d18'; ctx.fill();
+      ctx.beginPath(); ctx.arc(k[0],k[1],i===0?4:3,0,Math.PI*2);
+      ctx.fillStyle=(i<=1||i===3||i===4)?s.acc:'#3a4d68'; ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(k[0],k[1],i===0?4:3,0,Math.PI*2); ctx.stroke();
+    });
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
