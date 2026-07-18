@@ -2397,16 +2397,248 @@ const TAZO={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME: DAIRY WARMER  (Phase 5, Unit 6 — §5.4)
+//  Spatial-packing on the corner-dairy pie warmer. The hub's only CALM
+//  game — no clock, no falling piece, no reaction test (D3-friendly).
+//  Verb = TAP-only (D13, settled): tap a pastry in the tray to SELECT it
+//  (held preview + rotation), tap the drawn ROTATE button to cycle its
+//  orientation, tap a shelf cell to PLACE it. NO drag, NO press() — so
+//  per D12/§3 the router leaves it on tap()-on-pointerdown, exactly like
+//  GUNGE. Blockdoku-style: place trominoes/tetromino anywhere on the 6×4
+//  shelf, a FULL HORIZONTAL ROW sells (clears) with a neon FRESH! flash,
+//  no gravity. Multi-row clears score exponentially (double-decker order).
+//
+//  Tray of 3, place in ANY ORDER (reading B, owner-approved 2026-07-18):
+//  §5.4's "tap a queued pastry to select" reads as free choice, which
+//  suits the calm ethos better than a forced FIFO head; the loss check is
+//  generalised from "the head can't fit" to "no tray piece fits anywhere".
+//  STRIKE = the whole tray is dead (D14, 3-lives): heat escapes, a life is
+//  lost, the shelf is WIPED (fresh warmer) and a new tray dealt — the wipe
+//  guarantees the fresh tray is placeable, so a strike can never chain in
+//  one frame. 3 strikes = over.
+//
+//  §8 holds throughout: tapping an invalid cell, an empty cell, or the
+//  rotate button with nothing held is a FREE no-op with a soft reject
+//  flash — never a strike. A strike is a board-state consequence, not a
+//  tap penalty. Seeded (D16-trivial): tray order via srnd(); placement /
+//  clear math stays live so free play is byte-identical. Reuses drawBG /
+//  ready+over screens / burst+pop / ranks (rule 9). par & all constants
+//  PROVISIONAL — retune with the roster (§5.6/§7). (Labels track FILE
+//  order — §7.)
+// ════════════════════════════════════════════════════════════════
+const DAIRY={
+  id:'dairy', name:'DAIRY WARMER', tag:'PACK THE PIE WARMER',
+  bestKey:'arc_dairy_best',
+  // par PROVISIONAL & SIM-INFORMED (no human play). A headless greedy replica over 200
+  // seeds scored median ≈4620 (p10 ≈2580, p90 ≈7980), median ≈147 placements/run — so the
+  // spec's par:250 would peg the 625 normaliser cap for ANY competent player (the GUNGE/TAZO
+  // par lesson). Set ~2200 so a strong run lands mid-band, not pegged. CAVEAT the other way:
+  // DAIRY has NO clock and a forgiving wipe-on-strike, so the greedy bot OVER-states a human
+  // (free row-clears + full resets) — real play may sit well below 4620, i.e. par may need to
+  // come DOWN after data, unlike the usual "too low" story. Retune with the roster (§7).
+  par:2200, // PROVISIONAL
+  ranks:[{s:0,t:'AFTER-SCHOOL REGULAR'},{s:400,t:'COUNTER HAND'},{s:1000,t:'WARMER WRANGLER'},{s:2000,t:'PIE ARCHITECT'},{s:3500,t:'DAIRY OWNER'}], // PROVISIONAL
+  COLS:6, ROWS:4, CELL:50, GX:30, GY:140,   // 6×4 glass shelf, 300×200 box
+  BASE_CLEAR:60,                             // per-row clear base — score += BASE×(2^rows − 1) (PROVISIONAL)
+  // Pastries as origin-relative [col,row] cells; orientations derived + deduped in init().
+  SHAPES:[
+    {name:'MINCE & CHEESE', col:'#e0a84a', cells:[[0,0],[1,0],[0,1],[1,1]]}, // 2×2 — 1 orientation
+    {name:'SAUSAGE ROLL',   col:'#d69a52', cells:[[0,0],[1,0],[2,0]]},       // 1×3 — 2 orientations
+    {name:'POTATO-TOP',     col:'#c07838', cells:[[0,0],[0,1],[1,1]]},       // L-tromino — 4 orientations
+  ],
+  pal(){ return PALS[8]; }, // warm caramel (hues PROVISIONAL, §3/§7)
+  // ── orientation maths (built once per init) ──
+  buildOris(){
+    const norm=cs=>{ const mc=Math.min(...cs.map(p=>p[0])), mr=Math.min(...cs.map(p=>p[1])); return cs.map(([c,r])=>[c-mc,r-mr]); };
+    const key=cs=>cs.map(p=>p[0]+','+p[1]).sort().join(';');
+    const rot=cs=>cs.map(([c,r])=>[-r,c]); // 90° CW about origin
+    this.ORIS=this.SHAPES.map(s=>{
+      const out=[], seen={}; let cur=s.cells;
+      for(let i=0;i<4;i++){ const n=norm(cur), k=key(n); if(!seen[k]){ seen[k]=1; out.push(n); } cur=rot(cur); }
+      return out;
+    });
+  },
+  init(){
+    this.buildOris();
+    this.grid=new Array(this.COLS*this.ROWS).fill(null); // null = empty, else pastry colour
+    this.tray=[]; this.sel=-1; this.rot=0;
+    this.lives=3; this.score=0; this.served=0; this.rowsCleared=0;
+    this.shake=0; this.banner=null; this.rejectAt=0; this.reject=null; // reject={cells,col,row}
+    this.best=loadBest(this.bestKey); this.newBest=false;
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.dealTray();
+  },
+  start(){ this.st='play'; },
+  // ── tray / pieces ──
+  dealTray(){ while(this.tray.length<3) this.tray.push(Math.floor(srnd(this)*this.SHAPES.length)); },
+  orisFor(shapeIdx){ return this.ORIS[shapeIdx]; },
+  fits(cells,col,row){
+    for(const [dc,dr] of cells){ const c=col+dc, r=row+dr;
+      if(c<0||c>=this.COLS||r<0||r>=this.ROWS) return false;
+      if(this.grid[r*this.COLS+c]!==null) return false; }
+    return true;
+  },
+  canPlaceAny(shapeIdx){
+    const oris=this.orisFor(shapeIdx);
+    for(const o of oris) for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++) if(this.fits(o,c,r)) return true;
+    return false;
+  },
+  trayDead(){ return this.tray.every(s=>!this.canPlaceAny(s)); },
+  // ── placement + clears ──
+  place(col,row){
+    const shapeIdx=this.tray[this.sel], ori=this.orisFor(shapeIdx)[this.rot%this.orisFor(shapeIdx).length];
+    if(!this.fits(ori,col,row)){ // soft reject — free no-op (§8), red ghost so the misfit is legible
+      this.reject={cells:ori,col,row}; this.rejectAt=performance.now(); sBad(); return;
+    }
+    const s=this.SHAPES[shapeIdx];
+    for(const [dc,dr] of ori){ const c=col+dc, r=row+dr; this.grid[r*this.COLS+c]=s.col;
+      const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2; burst(cx,cy,s.col,4,1.8); }
+    this.served++; sHit(); buzz(8);
+    this.tray.splice(this.sel,1); this.sel=-1; this.rot=0; this.reject=null;
+    this.dealTray();
+    this.resolveClears();
+    if(this.st==='play' && this.trayDead()) this.strike();
+  },
+  resolveClears(){
+    const full=[];
+    for(let r=0;r<this.ROWS;r++){ let f=true; for(let c=0;c<this.COLS;c++) if(this.grid[r*this.COLS+c]===null){ f=false; break; } if(f) full.push(r); }
+    const n=full.length; if(!n) return;
+    const p=this.pal();
+    for(const r of full){ for(let c=0;c<this.COLS;c++){ const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2;
+      burst(cx,cy,p.glow,6,3); this.grid[r*this.COLS+c]=null; } }
+    this.rowsCleared+=n;
+    const gained=this.BASE_CLEAR*(Math.pow(2,n)-1); // exponential — double-decker order
+    this.score+=gained;
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+    const my=this.GY+full[0]*this.CELL+this.CELL/2;
+    pop((n>1?n+' ROWS! ':'')+'+'+gained,W/2,my-4,p.ring,9);
+    this.banner={t:n>1?'FRESH ×'+n+'!':'FRESH!',life:1.3};
+    if(n>1){ sGold(); this.shake=6; } else sPerfect();
+    buzz(n>1?24:12);
+  },
+  strike(){
+    this.lives--; this.shake=8; sBad(); buzz(50);
+    this.banner={t:'HEAT ESCAPED!',life:1.4};
+    pop('-1',W/2,this.GY+100,'#ff5a5a',10);
+    if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); return; }
+    this.grid.fill(null);          // heat escaped → empty the warmer, fresh shelf (guarantees a placeable tray)
+    this.tray=[]; this.sel=-1; this.rot=0; this.reject=null; this.dealTray();
+  },
+  update(dt){
+    this.shake*=0.82;
+    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+  },
+  // ── layout ──
+  rotRect(){ return {x:W-104, y:462, w:92, h:44}; },
+  traySlotRect(i){ const bw=98, gap=6, x0=W/2-(bw*3+gap*2)/2; return {x:x0+i*(bw+gap), y:372, w:bw, h:70}; },
+  // draw an orientation's cells centred in a box (tray/ghost previews)
+  drawPiece(cx,cy,cells,cell,col,alpha){
+    let mc=1e9,mr=1e9,xc=-1e9,xr=-1e9;
+    for(const [c,r] of cells){ mc=Math.min(mc,c); mr=Math.min(mr,r); xc=Math.max(xc,c); xr=Math.max(xr,r); }
+    const w=(xc-mc+1)*cell, h=(xr-mr+1)*cell, ox=cx-w/2-mc*cell, oy=cy-h/2-mr*cell;
+    ctx.save(); ctx.globalAlpha=alpha==null?1:alpha;
+    for(const [c,r] of cells){ const x=ox+c*cell, y=oy+r*cell; rr(x+1,y+1,cell-2,cell-2,4); ctx.fillStyle=col; ctx.fill(); }
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    // shelf
+    const CELL=this.CELL;
+    for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++){
+      const x0=this.GX+c*CELL, y0=this.GY+r*CELL, v=this.grid[r*this.COLS+c];
+      rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.fillStyle=v?v:'#1a1206'; ctx.fill();
+      ctx.strokeStyle=v?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'; ctx.lineWidth=1; rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.stroke();
+      if(v){ ctx.fillStyle='rgba(255,255,255,0.14)'; rr(x0+6,y0+6,CELL-12,6,3); ctx.fill(); } // glass sheen
+    }
+    // glass shelf edges
+    ctx.strokeStyle=p.acc+'88'; ctx.lineWidth=2;
+    for(let r=0;r<=this.ROWS;r++){ const y=this.GY+r*CELL; ctx.beginPath(); ctx.moveTo(this.GX-4,y); ctx.lineTo(this.GX+this.COLS*CELL+4,y); ctx.stroke(); }
+    // reject ghost (soft misfit, §8)
+    if(this.reject&&performance.now()-this.rejectAt<220){
+      const g=this.reject;
+      for(const [dc,dr] of g.cells){ const c=g.col+dc, r=g.row+dr;
+        if(c<0||c>=this.COLS||r<0||r>=this.ROWS) continue;
+        const x0=this.GX+c*CELL, y0=this.GY+r*CELL; ctx.save(); ctx.globalAlpha=0.35; ctx.fillStyle='#ff5a5a'; rr(x0+3,y0+3,CELL-6,CELL-6,6); ctx.fill(); ctx.restore(); }
+    }
+    drawFX();
+    // tray of 3
+    for(let i=0;i<3;i++){ const rrc=this.traySlotRect(i), has=i<this.tray.length, on=this.sel===i;
+      ctx.save(); ctx.globalAlpha=has?1:0.25;
+      rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.fillStyle=on?p.acc+'44':'rgba(0,0,0,0.35)'; ctx.fill();
+      ctx.strokeStyle=on?p.glow:p.ring+'66'; ctx.lineWidth=on?2.5:1.5; rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.stroke();
+      if(has){ const s=this.SHAPES[this.tray[i]], cells=on?this.orisFor(this.tray[i])[this.rot%this.orisFor(this.tray[i]).length]:this.ORIS[this.tray[i]][0];
+        this.drawPiece(rrc.x+rrc.w/2,rrc.y+rrc.h/2-4,cells,13,s.col,1);
+        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='center'; ctx.fillText(s.name,rrc.x+rrc.w/2,rrc.y+rrc.h-6); }
+      ctx.restore();
+    }
+    // ROTATE button (drawn, rule 4) — dim when nothing held
+    const rb=this.rotRect(), canRot=this.sel>=0&&this.orisFor(this.tray[this.sel]).length>1;
+    ctx.save(); ctx.globalAlpha=this.sel>=0?(canRot?1:0.5):0.35;
+    rr(rb.x,rb.y,rb.w,rb.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(rb.x,rb.y,rb.w,rb.h,10); ctx.stroke();
+    const rcx=rb.x+22, rcy=rb.y+rb.h/2; // circular arrow
+    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(rcx,rcy,9,-0.4,Math.PI*1.5); ctx.stroke();
+    const ex=rcx+Math.cos(Math.PI*1.5)*9, ey=rcy+Math.sin(Math.PI*1.5)*9; ctx.fillStyle=p.glow;
+    ctx.beginPath(); ctx.moveTo(ex,ey-1); ctx.lineTo(ex-5,ey-4); ctx.lineTo(ex-1,ey+4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('ROTATE',rb.x+40,rcy+3);
+    ctx.restore();
+    // banner (FRESH! / HEAT ESCAPED!)
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='12px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,132); ctx.restore(); }
+    // rank
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-30);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-16); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'DAIRY WARMER',['TAP A PASTRY TO PICK IT UP','TAP ROTATE TO TURN IT','TAP A SHELF CELL TO PLACE','FILL A ROW TO SERVE IT FRESH']);
+    if(this.st==='over') drawOverScreen(p,'WARMER WENT COLD',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'ROWS '+this.rowsCleared+' · SERVED '+this.served);
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // ROTATE button
+    if(inR(x,y,this.rotRect())){
+      if(this.sel>=0){ const n=this.orisFor(this.tray[this.sel]).length; if(n>1){ this.rot=(this.rot+1)%n; sTick(0.04); buzz(6); } else { this.rejectAt=performance.now(); } }
+      else this.rejectAt=performance.now(); // nothing held → free no-op
+      return;
+    }
+    // tray select
+    for(let i=0;i<this.tray.length;i++){ if(inR(x,y,this.traySlotRect(i))){ this.sel=i; this.rot=0; this.reject=null; sTick(0.05); buzz(6); return; } }
+    // shelf place
+    const CELL=this.CELL, col=Math.floor((x-this.GX)/CELL), row=Math.floor((y-this.GY)/CELL);
+    if(col>=0&&col<this.COLS&&row>=0&&row<this.ROWS){
+      if(this.sel>=0) this.place(col,row);
+      else this.rejectAt=performance.now(); // no piece held → free no-op
+      return;
+    }
+    this.rejectAt=performance.now(); // stray tap = free no-op
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER, DAIRY after SCRAMBLE
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,bones:5};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
@@ -2746,6 +2978,18 @@ function drawMenuIcon(g,cx,cy){
       ctx.beginPath(); ctx.arc(d[0],d[1],7,0,Math.PI*2); ctx.stroke();
     });
     drawMark(9,-4,14,'#0a0f1e');
+  } else if(g.id==='dairy'){
+    // the corner-dairy pie warmer: warm glass case, a shelf, a pie inside (rule 4 — all drawn)
+    const s=PALS[8];
+    rr(-19,-17,38,34,6); ctx.fillStyle='#1a1206'; ctx.fill();
+    rr(-17,-15,34,30,5); ctx.fillStyle=s.acc+'33'; ctx.fill();
+    ctx.strokeStyle=s.ring; ctx.lineWidth=1.5; rr(-17,-15,34,30,5); ctx.stroke();
+    ctx.strokeStyle=s.acc+'99'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(-17,0); ctx.lineTo(17,0); ctx.stroke(); // shelf
+    ctx.beginPath(); ctx.arc(0,8,7,0,Math.PI*2); ctx.fillStyle='#e0a84a'; ctx.shadowColor=s.glow; ctx.shadowBlur=8; ctx.fill(); ctx.shadowBlur=0; // pie
+    ctx.strokeStyle='#7a4a1a'; ctx.lineWidth=1; // lattice
+    ctx.beginPath(); ctx.moveTo(-5,5); ctx.lineTo(5,11); ctx.moveTo(-5,11); ctx.lineTo(5,5); ctx.stroke();
+    for(let i=0;i<3;i++){ ctx.strokeStyle=s.glow+'aa'; ctx.lineWidth=1.5; ctx.beginPath(); // heat wisps
+      ctx.moveTo(-8+i*8,-8); ctx.quadraticCurveTo(-5+i*8,-12,-8+i*8,-16); ctx.stroke(); }
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
