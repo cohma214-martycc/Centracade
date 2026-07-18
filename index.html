@@ -653,6 +653,235 @@ const SCAN={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME: HOWLER  (Phase 5, Unit 4) — the foam Mega Howler rocket.
+//  The hub's ANALOG break: a swipe game where HOW HARD matters, not
+//  WHEN. First real consumer of the press/drag/release pointer stream
+//  (§3, D12): press captures the origin, drag previews the aim,
+//  release computes angle + velocity (LOGICAL px/ms) and hurls the
+//  rocket into the screen. tap() is only ever reached for ready-start
+//  / over-restart — the router calls it on release when st!=='play';
+//  gameplay never touches tap(). Pseudo-3D is scale + a y-offset arc,
+//  no matrices (the BONES frame-flip precedent). Endless + 3 lives (D14).
+//  (File section labels track FILE order, not the GAMES/daily order — §7.)
+// ════════════════════════════════════════════════════════════════
+const HOWLER={
+  id:'howler', name:'HOWLER', tag:'SWIPE TO LAUNCH',
+  bestKey:'arc_howler_best',
+  par:500, // PROVISIONAL — pure guess vs ~100/hit; instrument before trusting (§7)
+  ranks:[{s:0,t:'BACKYARD ARM'},{s:250,t:'OVER THE CLOTHESLINE'},{s:650,t:'ONTO THE GARAGE ROOF'},{s:1200,t:"NEXT DOOR'S SECTION"},{s:2000,t:'GONE OVER THE FENCE'},{s:3200,t:'WHISTLER'}],
+
+  // ── swipe → throw calibration (ALL PROVISIONAL) ──────────────────
+  // vel is LOGICAL px/ms in the 360×640 space (getXY already maps into
+  // it), NOT the spec's foreign 1.5–1.8 (different coordinate space).
+  // These MUST be measured on a real phone: flip CALIBRATE on, throw
+  // ~50–100 times one-thumb in portrait, read the logged distribution
+  // (console + on-screen min/max), then set VREF at the comfortable
+  // median and the whistle band ~±8% around it. A window nobody can hit
+  // is worse than none. I cannot run a device, so these ship as a
+  // synthetic guess — retune with the roster.
+  CALIBRATE:false,
+  VREF:2.0,           // PROVISIONAL — velocity (px/ms) that lands on the target plane (power 1.0)
+  WHISTLE_LO:1.85,    // PROVISIONAL — narrow sweet spot, centred on VREF
+  WHISTLE_HI:2.15,    // PROVISIONAL
+  MIN_DIST:20,        // px — below this the gesture is a harmless no-op, no life (§8)
+  MAX_DT:600,         // ms — above this it's a lazy drag, not a throw: no-op
+  POW_MIN:0.35, POW_MAX:1.7, XAIM:0.72, XAIM_CAP:150, // PROVISIONAL
+
+  // ── scene (pseudo-3D: depth z drives scale + a y-offset arc) ─────
+  LAUNCH_X:W/2, LAUNCH_Y:548, TARGET_Y:176, LOFT:70, FLIGHT_T:0.9, // PROVISIONAL
+
+  // ── wind (drawn arrows, per-frame lateral accel, seeded) ─────────
+  WIND_BASE:90, WIND_STEP:45, WIND_CAP:340, // px/s² // PROVISIONAL
+
+  centerR(){ return Math.max(11, 22 - this.stage*1.4); },
+  rimR(){ return Math.max(26, 46 - this.stage*2.2); },
+  windStrength(){ return Math.min(this.WIND_CAP, this.WIND_BASE + this.stage*this.WIND_STEP); },
+  // Seeded content (D16-trivial: no board to make unsolvable). Everyone
+  // gets the same Nth-throw wind and same target drift in the daily,
+  // regardless of when they throw — srnd's call ORDER is deterministic.
+  rollWind(){ const mag=this.windStrength()*(0.4+0.6*srnd(this)); this.wind=(srnd(this)<0.5?-1:1)*mag; },
+  placeTarget(){ this.targetX=70+srnd(this)*(W-140); },
+
+  init(){
+    this.score=0; this.best=loadBest(this.bestKey); this.newBest=false;
+    this.lives=3; this.stage=0; this.throws=0; this.whistles=0;
+    this.rocket=null; this.aim=null;
+    this.missFlash=0; this.hitFlash=0; this.shake=0; this.lastOutcome='';
+    this.velLog=[]; this.lastVel=0;
+    this.st='ready'; this.overAt=0;
+    this.placeTarget(); this.rollWind();
+    parts=[]; pops=[];
+  },
+  start(){ this.st='play'; },
+  gameOver(){ this.st='over'; this.overAt=performance.now(); this.rocket=null; this.aim=null; sBad(); buzz(70); if(this.onOver) this.onOver(); },
+  stageUp(){ this.stage++; sStage(); this.placeTarget(); },
+
+  // ── pointer stream (D12) — the whole point of Unit 4 ─────────────
+  press(x,y){ if(this.rocket) return; this.aim={x0:x,y0:y,t0:performance.now(),cx:x,cy:y}; },
+  drag(x,y){ if(this.aim){ this.aim.cx=x; this.aim.cy=y; } },
+  release(x,y){
+    const a=this.aim; this.aim=null;
+    if(!a || this.rocket) return; // pointercancel also lands here — a stale/short one no-ops below
+    const dx=x-a.x0, dy=y-a.y0, dist=Math.hypot(dx,dy), dt=performance.now()-a.t0;
+    if(dist<this.MIN_DIST || dt>this.MAX_DT){ sTick(0.02); return; } // stray/lazy = free no-op (§8)
+    const vel=dist/Math.max(dt,8); // LOGICAL px/ms — the whistle is a band on THIS
+    this.lastVel=vel;
+    if(this.CALIBRATE){ this.velLog.push(vel); console.log('HOWLER swipe vel(px/ms)='+vel.toFixed(3)+' dist='+dist.toFixed(0)+' dt='+dt.toFixed(0)); }
+    this.launch(vel,dx,dy);
+  },
+  launch(vel,dx,dy){
+    const power=Math.max(this.POW_MIN,Math.min(this.POW_MAX,vel/this.VREF)); // depth reach
+    const aimX=Math.max(-this.XAIM_CAP,Math.min(this.XAIM_CAP,dx*this.XAIM)); // lateral aim
+    const whistle=vel>=this.WHISTLE_LO && vel<=this.WHISTLE_HI;
+    this.rocket={ prog:0, landZ:power, x:this.LAUNCH_X, vx:aimX/this.FLIGHT_T, y:this.LAUNCH_Y, z:0, scale:1, whistle, wind:whistle?0:this.wind };
+    this.throws++;
+    if(whistle){ this.whistles++; this.shake=1; sGold(); } else sHit();
+    buzz(12);
+  },
+
+  update(dt){
+    if(this.missFlash>0) this.missFlash-=dt*2.2;
+    if(this.hitFlash>0) this.hitFlash-=dt*2.2;
+    if(this.shake>0) this.shake-=dt*3;
+    if(this.st!=='play') return;
+    const r=this.rocket;
+    if(r){
+      r.vx+=r.wind*dt;   // per-frame wind accel — immune (0) on a whistle throw
+      r.x+=r.vx*dt;
+      r.prog+=dt/this.FLIGHT_T;
+      const pr=Math.min(1,r.prog);
+      r.z=r.landZ*pr;
+      r.y=this.LAUNCH_Y+(this.TARGET_Y-this.LAUNCH_Y)*r.z - this.LOFT*Math.sin(Math.PI*pr);
+      r.scale=Math.max(0.14,1-0.8*r.z);
+      if(r.prog>=1) this.resolve(r);
+    }
+  },
+  resolve(r){
+    const fy=this.LAUNCH_Y+(this.TARGET_Y-this.LAUNCH_Y)*r.landZ; // vertical landing = depth reach
+    const d=Math.hypot(r.x-this.targetX, fy-this.TARGET_Y);
+    let base=0;
+    if(d<=this.centerR()) base=100; else if(d<=this.rimR()) base=50;
+    this.rocket=null;
+    if(base>0){
+      const pts=base*(r.whistle?2:1); // whistle = ×2
+      this.score+=pts;
+      if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+      const col=r.whistle?'#ffd24a':(base===100?PALS[0].glow:'#f5ece0');
+      burst(this.targetX,this.TARGET_Y,col,r.whistle?16:11,3.4);
+      pop((r.whistle?'WHISTLE! +':'+')+pts,this.targetX,this.TARGET_Y-16,col,r.whistle?9:7);
+      this.hitFlash=1; this.lastOutcome=base===100?'CENTRE':'RIM';
+      if(base===100) sPerfect(); else sHit();
+      this.stageUp();
+    } else {
+      this.lives--; this.missFlash=1; this.lastOutcome='MISS'; sBad(); buzz(40);
+      burst(r.x,fy,'#ff5566',9,3);
+      pop('MISS',r.x,Math.min(fy,H-40)-12,'#ff6a8a',7);
+      if(this.lives<=0){ this.gameOver(); return; }
+    }
+    this.rollWind(); // pre-roll next throw's wind (seeded; shown live in the HUD)
+  },
+
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // during play the router routes to press/drag/release — never here (D12)
+  },
+
+  drawTarget(){
+    const p=PALS[0], x=this.targetX, y=this.TARGET_Y, pulse=0.6+0.4*Math.sin(tick*0.12);
+    ctx.save();
+    ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(x,y+this.rimR()); ctx.lineTo(x,y+96); ctx.stroke();
+    ctx.strokeStyle=p.ring; ctx.shadowColor=p.glow; ctx.shadowBlur=10; ctx.lineWidth=3; ctx.globalAlpha=0.85;
+    ctx.beginPath(); ctx.arc(x,y,this.rimR(),0,Math.PI*2); ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.globalAlpha=0.45+0.3*pulse; ctx.fillStyle=p.acc;
+    ctx.beginPath(); ctx.arc(x,y,this.centerR(),0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=1; ctx.fillStyle='#f5ece0';
+    ctx.beginPath(); ctx.arc(x,y,Math.max(3,this.centerR()*0.34),0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  },
+  drawRocket(x,y,s){
+    ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+    rr(-9,-14,18,30,9); ctx.fillStyle='#140a08'; ctx.fill();
+    const g=ctx.createLinearGradient(-9,0,9,0);
+    g.addColorStop(0,'#c04808'); g.addColorStop(0.5,'#ff7a32'); g.addColorStop(1,'#c04808');
+    rr(-7,-12,14,26,7); ctx.fillStyle=g; ctx.fill();
+    ctx.fillStyle='#f0e0c0'; ctx.beginPath(); ctx.moveTo(-7,-8); ctx.quadraticCurveTo(0,-23,7,-8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#e85d15';
+    ctx.beginPath(); ctx.moveTo(-7,6); ctx.lineTo(-13,14); ctx.lineTo(-7,14); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(7,6); ctx.lineTo(13,14); ctx.lineTo(7,14); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,13,4,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  },
+  drawWind(){
+    const dir=this.wind<0?-1:1, mag=Math.abs(this.wind);
+    const n=Math.max(1,Math.min(4,Math.round(mag/(this.WIND_CAP/4)))), cx=W/2, y=132;
+    ctx.save(); ctx.textAlign='center';
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('WIND',cx,y-9);
+    const col=mag>this.WIND_BASE*2.2?'#ff6a8a':'#8ad0ff';
+    ctx.strokeStyle=col; ctx.shadowColor=col; ctx.shadowBlur=6; ctx.lineWidth=2; ctx.lineCap='round';
+    for(let i=0;i<n;i++){ const bx=cx+dir*(6+i*11);
+      ctx.beginPath(); ctx.moveTo(bx-dir*4,y-4); ctx.lineTo(bx+dir*4,y); ctx.lineTo(bx-dir*4,y+4); ctx.stroke(); }
+    ctx.restore(); ctx.shadowBlur=0;
+  },
+  drawGhost(){
+    const a=this.aim; if(!a||this.rocket) return;
+    const dx=a.cx-a.x0, dy=a.cy-a.y0, dist=Math.hypot(dx,dy);
+    if(dist<6) return;
+    const ang=Math.atan2(dy,dx);
+    ctx.save();
+    // AIM ghost only — a landing arc would over-promise a spot we can't
+    // know until release velocity (the whistle). Direction is honest.
+    ctx.globalAlpha=0.5; ctx.strokeStyle=PALS[0].glow; ctx.shadowColor=PALS[0].glow; ctx.shadowBlur=8;
+    ctx.lineWidth=3; ctx.lineCap='round'; ctx.setLineDash([5,5]);
+    ctx.beginPath(); ctx.moveTo(this.LAUNCH_X,this.LAUNCH_Y);
+    ctx.lineTo(this.LAUNCH_X+Math.cos(ang)*Math.min(dist,120), this.LAUNCH_Y+Math.sin(ang)*Math.min(dist,120));
+    ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    const pw=Math.min(1,dist/220), bx=W-22, by=H-190, bh=120; // drag-distance power proxy
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.15)'; rr(bx-5,by,10,bh,5); ctx.fill();
+    ctx.fillStyle=PALS[0].ring; rr(bx-5,by+bh*(1-pw),10,bh*pw,5); ctx.fill();
+    ctx.restore();
+  },
+  render(){
+    const p=PALS[0];
+    let ox=0,oy=0;
+    if(this.shake>0){ ox=(Math.random()-0.5)*8*this.shake; oy=(Math.random()-0.5)*8*this.shake; }
+    ctx.save(); ctx.translate(ox,oy);
+    drawBG(p,H-70);
+    ctx.fillStyle='#0a0604'; ctx.fillRect(0,H-56,W,56);
+    ctx.fillStyle=p.acc+'44'; ctx.fillRect(0,H-56,W,2);
+    if(this.missFlash>0){ ctx.fillStyle='rgba(255,40,40,'+this.missFlash*0.22+')'; ctx.fillRect(0,0,W,H); }
+    if(this.hitFlash>0){ ctx.fillStyle='rgba(255,210,74,'+this.hitFlash*0.16+')'; ctx.fillRect(0,0,W,H); }
+    this.drawTarget();
+    ctx.fillStyle='#2a1810'; ctx.beginPath(); ctx.ellipse(this.LAUNCH_X,this.LAUNCH_Y+10,16,7,0,0,Math.PI*2); ctx.fill();
+    if(this.rocket) this.drawRocket(this.rocket.x,this.rocket.y,this.rocket.scale);
+    else if(this.st==='play') this.drawRocket(this.LAUNCH_X,this.LAUNCH_Y-6,0.9); // primed on the pad
+    this.drawGhost();
+    drawFX();
+    ctx.restore();
+    // HUD (unshaken)
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-30+i*30; ctx.globalAlpha=i<this.lives?1:0.18; this.drawRocket(lx,112,0.5); ctx.globalAlpha=1; }
+    this.drawWind();
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.textAlign='center';
+    ctx.fillText(rankFor(this.ranks,this.score).t,W/2,H-14);
+    if(this.CALIBRATE && this.velLog.length){
+      const mn=Math.min(...this.velLog), mx=Math.max(...this.velLog);
+      ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#8aff8a'; ctx.textAlign='left';
+      ctx.fillText('v='+this.lastVel.toFixed(2)+' n='+this.velLog.length,8,H-40);
+      ctx.fillText('min '+mn.toFixed(2)+' max '+mx.toFixed(2),8,H-30);
+    }
+    if(this.st==='ready') drawReadyScreen(p,'HOWLER',['SWIPE UP TO HURL THE HOWLER','HARDER = FARTHER — FIND THE WHISTLE','MIND THE WIND · 3 MISSES = OUT']);
+    if(this.st==='over') drawOverScreen(p,'HOWLER DOWN',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1)+' · '+this.whistles+' WHISTLES');
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  GAME 3: CHATTER  (the 90s NZ playground classic)
 // ════════════════════════════════════════════════════════════════
 const CHATTER={
@@ -1903,7 +2132,7 @@ const GUNGE={
 // ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,SWINGBALL,GUNGE,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — GUNGE slotted after SWINGBALL per §5.6
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -1928,7 +2157,7 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 const GAUNTLET={
   // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
-  PALMAP:{stack:0,scan:1,swing:3,gunge:6,chatter:3,scramble:4,bones:5}, // PALS[2] freed by CHAIN prune — now the hub palette
+  PALMAP:{stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,scramble:4,bones:5}, // HOWLER reuses PALS[0] (§5.1). PALS[2] freed by CHAIN prune = hub palette
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   beginDaily(){
@@ -2157,7 +2386,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -2173,6 +2402,21 @@ function drawMenuIcon(g,cx,cy){
     ctx.lineWidth=2.5; ctx.lineCap='round';
     ctx.beginPath(); ctx.moveTo(-16,20); ctx.lineTo(-2,2); ctx.stroke();
     ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2,2,3,0,Math.PI*2); ctx.fill();
+  } else if(g.id==='howler'){
+    // the foam Mega Howler mid-flight, motion streaks behind (all drawn, rule 4)
+    ctx.save(); ctx.rotate(-0.5);
+    ctx.strokeStyle=PALS[0].glow+'99'; ctx.lineWidth=2; ctx.lineCap='round';
+    for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-8+i*3,16-i*2); ctx.lineTo(-2+i*3,9-i*2); ctx.stroke(); }
+    rr(-8,-15,16,28,8); ctx.fillStyle='#140a08'; ctx.fill();
+    const g2=ctx.createLinearGradient(-8,0,8,0);
+    g2.addColorStop(0,'#c04808'); g2.addColorStop(0.5,'#ff7a32'); g2.addColorStop(1,'#c04808');
+    rr(-6,-13,12,24,6); ctx.fillStyle=g2; ctx.fill();
+    ctx.fillStyle='#f0e0c0'; ctx.beginPath(); ctx.moveTo(-6,-9); ctx.quadraticCurveTo(0,-22,6,-9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#e85d15';
+    ctx.beginPath(); ctx.moveTo(-6,5); ctx.lineTo(-12,13); ctx.lineTo(-6,13); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(6,5); ctx.lineTo(12,13); ctx.lineTo(6,13); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,11,3.5,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
   } else if(g.id==='swing'){
     // pole + rope + orbiting ball carrying the mark
     rr(-3,-22,6,44,3); ctx.fillStyle='#5a4324'; ctx.fill();
@@ -2285,7 +2529,7 @@ function drawMenu(){
   if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
+    const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');

@@ -4,7 +4,7 @@ Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 
 
 **Phases 1–4.5 shipped**: fixes, the seven-game roster + paginated menu, the gauntlet, the once-a-day seeded **TUCK SHOP RUN** daily, and the 4.5 revision pass (R1 SCRAMBLE dial-up, R3 daily-only gauntlet + full-page daily tile, R4 SWINGBALL 45° view, R5 KNUCKLEBONES pacing).
 
-**Phase 5 is underway and is the largest change since Phase 2**: CHAIN is **pruned (Unit 5.0, shipped)**, **GUNGE has shipped (Unit 5.2)**, and four deliberately *different-feeling* games still join — HOWLER, TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster was stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog, grid-rotation (GUNGE — the first puzzle in the hub), directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11** — currently at **7** (GUNGE landed; four new games pending).
+**Phase 5 is underway and is the largest change since Phase 2**: CHAIN is **pruned (Unit 5.0, shipped)**, **GUNGE has shipped (Unit 5.2)**, **HOWLER has shipped (Unit 4)**, and three deliberately *different-feeling* games still join — TAZO TYCOON, DAIRY WARMER, WEAVER. The existing roster was stylistically narrow (tap-timing and tap-target). Phase 5 adds swipe-analog (HOWLER — the first swipe game in the hub), grid-rotation (GUNGE — the first puzzle), directional-merge, spatial-packing, and path-drawing. Roster goes **7 → 6 → 11** — currently at **8** (GUNGE + HOWLER landed; three new games pending).
 
 This file has three jobs: (1) hard invariants you must never break, (2) an accurate map of the current code, (3) the settled roadmap. Decisions in the **Decision log** are final — do not relitigate them; implement them.
 
@@ -101,7 +101,7 @@ State machine: `'ready' → 'play' → 'over'`. Restart requires `performance.no
 
 #### Contract extension — pointer stream (Phase 5) ✅ WIRED (Unit 2)
 
-The router implements the stream below (`gameGesture` + `gameDown()` in the Input section). No Phase 5 game consumes it yet — every current game lacks `press`, so all six stay on tap-on-pointerdown, unchanged. It is forwarded in **both** `mode==='game'` and the gauntlet-playing path (Phase 5 games join the daily), so a `press`-game works in the daily too.
+The router implements the stream below (`gameGesture` + `gameDown()` in the Input section). **HOWLER (Unit 4) is the first consumer** — it defines `press`/`drag`/`release`; the other games still lack `press` and stay on tap-on-pointerdown, unchanged. It is forwarded in **both** `mode==='game'` and the gauntlet-playing path (Phase 5 games join the daily), so a `press`-game works in the daily too.
 
 Four of the five Phase 5 games need more than a tap. Add **one** optional extension rather than five bespoke input hacks:
 
@@ -138,7 +138,7 @@ The existing `menuDrag` logic already proves the pattern: menu resolves on `poin
 
 With CHAIN gone, **CHATTER is the only palette-cycling game**. Its stage cycle is now an **explicit index list** (`CHATTER_PALS`, Unit 2) instead of `(2+stage)%PALS.length` — the list reproduces the old sequence byte-for-byte (`2,3,4,5,0,1,…`) but is decoupled from `PALS.length`, so appending palettes can no longer silently recolour CHATTER's stages. (Note: the shipped list preserves current colours; it is **not** the illustrative `[3,4,5,0,1,2]` that once appeared here, which would have recoloured stage 0.)
 
-Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWLER reuses `0`; **`6` GUNGE** slime lime (**now referenced** — `PALMAP.gunge=6`, menu-icon + card lookups), **`7` TAZO** electric holo blue, **`8` DAIRY** warm caramel, **`9` WEAVER** navy + red-sock. `7`/`8`/`9` hues stay **tentative** — retune when the owning game is built. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
+Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWLER reuses `0` (**now referenced** — `PALMAP.howler=0`, menu-icon + card lookups); **`6` GUNGE** slime lime (**now referenced** — `PALMAP.gunge=6`, menu-icon + card lookups), **`7` TAZO** electric holo blue, **`8` DAIRY** warm caramel, **`9` WEAVER** navy + red-sock. `7`/`8`/`9` hues stay **tentative** — retune when the owning game is built. Drawing a surface directly (asphalt-court precedent) is still fine where a full palette isn't warranted.
 
 ---
 
@@ -177,7 +177,7 @@ Phase 5 palette entries (added Unit 2, unreferenced until each game lands): HOWL
 
 **Why**: every current game is a tap — either timing a moving thing (STACK, SWINGBALL, CHATTER) or hitting a target (SCAN, SCRAMBLE, BONES). The hub is cohesive but monotonous over a 5–10 min daily. Phase 5 buys variety of *verb*, not just of theme.
 
-**Order of work**: (1) prune CHAIN ✅ **shipped**, (2) pointer-stream contract extension, (3) palette-cycle fix + new palettes, (4) games in the order below — GUNGE ✅ **shipped (5.2)**, HOWLER/TAZO/DAIRY/WEAVER pending. Ship them one at a time — each is independently mergeable and independently prunable.
+**Order of work**: (1) prune CHAIN ✅ **shipped**, (2) pointer-stream contract extension ✅ **shipped (Unit 2)**, (3) palette-cycle fix + new palettes ✅ **shipped (Unit 2)**, (4) games in the order below — GUNGE ✅ **shipped (5.2)**, HOWLER ✅ **shipped (Unit 4)**, TAZO/DAIRY/WEAVER pending. Ship them one at a time — each is independently mergeable and independently prunable.
 
 #### 5.0 — Prune CHAIN ✅ SHIPPED
 
@@ -191,18 +191,19 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 - Roster: STACK → SCAN → SWINGBALL → CHATTER → SCRAMBLE → KNUCKLEBONES (6). Daily is 6 games until the new ones land, then 11.
 - **Beyond spec**: the source-file `GAME N` section labels were resequenced 1–6 to close the gap CHAIN left (comment-only). They track *file order*, not the `GAMES`/daily sequence — see §7.
 
-#### 5.1 — HOWLER (`id:'howler'`, `arc_howler_best`, PALS[0])
+#### 5.1 — HOWLER (`id:'howler'`, `arc_howler_best`, PALS[0]) ✅ SHIPPED (Unit 4)
 
-**Hook**: the foam Mega Howler rocket, 90s/00s playground. **Verb**: swipe. **Ethos**: the analog break in a hub of digital taps — the one game where *how hard* matters, not *when*.
+**Hook**: the foam Mega Howler rocket, 90s/00s playground. **Verb**: swipe. **Ethos**: the analog break in a hub of digital taps — the one game where *how hard* matters, not *when*. As-shipped (code in `index.html` is the source of truth):
 
-- **Input** (first consumer of the pointer stream): `press` captures `(x,y,t)`; `release` computes `angle = atan2(dy,dx)`, `dist = hypot`, `vel = dist/(t2−t1)` in **logical px/ms**. `drag` draws a live aim ghost — arc preview + a power bar — so the swipe is legible before commit. No throw fires from a tap: below a minimum `dist` (~20px) or above a maximum `dt` (~600ms), the gesture is a harmless no-op, not a wasted life.
-- **Pseudo-3D**: throw *into* the screen. Depth `z` runs 0→1 over the arc; sprite scale `1.0 → 0.2`; the target sits at the far end. Gravity is an arcade scalar fighting the swipe's vertical component; the horizontal component plus `currentWind` drives x. No real 3D, no matrices — scale + a y-offset curve sells it, the same way the frame-flip sells BONES' spin.
-- **The whistle sweet spot**: a narrow velocity window → `sGold()`, screenshake, bright primary trail, **wind immunity, ×2**. **The spec's `1.5–1.8 px/ms` is from a different coordinate space — it must be recalibrated for 360×640 during the build.** Instrument first: log real swipe velocities on a phone, then set the window at roughly the 70th percentile of comfortable throws, ~±10% wide. A whistle window nobody can hit is worse than no whistle.
-- **Wind**: drawn arrows (rule 4) in the HUD, per-frame horizontal acceleration on the airborne rocket. Seeded content.
-- **Scoring**: centre 100, rim 50, miss 0 + a life. 3 misses = over. Endless: per stage the target shrinks and drifts, wind strengthens.
-- **Seeded**: wind sequence, target position/drift. **Not** the swipe physics.
-- **Ranks** (NZ playground): BACKYARD ARM → OVER THE CLOTHESLINE → ONTO THE GARAGE ROOF → NEXT DOOR'S SECTION → GONE OVER THE FENCE → WHISTLER.
-- `par:500` PROVISIONAL — pure guess against 100/hit; instrument early.
+- **Input — first real consumer of the pointer stream (D12)**: `press` captures `(x,y,t)`; `drag` updates the live aim; `release` computes `dx,dy`, `dist=hypot`, `dt`, and `vel = dist/max(dt,8)` in **logical px/ms** (`getXY` already maps into 360×640, so the unit is correct without extra scaling). The aim **ghost** is an honest **direction dash + a drag-distance power bar** — deliberately *not* a landing arc, because the true landing depends on release velocity, which can't be known mid-drag. Below `MIN_DIST 20`px or above `MAX_DT 600`ms the gesture is a **free no-op** (§8), not a wasted life. `pointercancel` routes to `release(lastCoords)` (router); a stale/short cancel no-ops, a fast one may fire — accepted per D12 (no per-game input hacks).
+- **Pseudo-3D (as-shipped)**: one rocket in flight at a time. Depth `z` runs 0→`landZ` over `FLIGHT_T 0.9`s; screen-y = `LAUNCH_Y + (TARGET_Y−LAUNCH_Y)·z − LOFT·sin(π·prog)` (the arc hump); `scale = max(0.14, 1−0.8·z)`. **Velocity → depth** (`power = clamp(vel/VREF, 0.35, 1.7)`, `landZ=power`) and **swipe angle → lateral** (`aimX = clamp(dx·0.72, ±150)`) are separate mappings, so the whistle can be retuned without touching how throws fly. No matrices (the BONES frame-flip precedent).
+- **The whistle sweet spot**: `vel ∈ [WHISTLE_LO 1.85, WHISTLE_HI 2.15]` (px/ms) → `sGold()`, screenshake, gold burst, **wind immunity, ×2**. **These are a synthetic guess, ALL `// PROVISIONAL`** — the spec's `1.5–1.8` is a foreign coordinate space and this session could not measure on-device. A **`CALIBRATE` flag** ships in the object: flip it on to log every throw's logical-px/ms `vel` (console + on-screen min/max/count), gather ~50–100 one-thumb throws, set `VREF` at the comfortable median and the band ~±8% around it, then flip it off. **Owner still owes the on-device calibration pass** (§7).
+- **Wind**: drawn HUD chevrons (rule 4); per-frame lateral **acceleration** on the airborne rocket (`WIND_BASE 90 + stage·45`, cap `340` px/s², sign/magnitude from `srnd`). Whistle throws are immune.
+- **Scoring**: centre (`d ≤ centerR`) 100, rim (`d ≤ rimR`) 50, miss 0 + a life; **3 misses = over** (D14, endless). Each scoring hit advances a stage: `centerR 22→11`, `rimR 46→26`, wind strengthens, target re-drifts.
+- **Seeded**: target x-drift + per-throw wind via `srnd(this)` (call **order** is deterministic, so everyone gets the same Nth-throw wind in the daily regardless of timing). **Swipe physics stay live** — free play byte-identical.
+- **Ranks** (NZ playground): BACKYARD ARM → OVER THE CLOTHESLINE → ONTO THE GARAGE ROOF → NEXT DOOR'S SECTION → GONE OVER THE FENCE → WHISTLER (thresholds `0/250/650/1200/2000/3200`).
+- **Roster**: slotted into `GAMES` **after SCAN** per §5.6; `PALMAP.howler=0` in all three palette maps (menu count/emoji grid/`drawBars` derive from `GAMES.length`). Daily is now **8 games**.
+- `par:500` PROVISIONAL — pure guess against ~100/hit; instrument early. The `whistles` over-screen stat counts sweet-spot-**velocity** throws (including ones that missed laterally), i.e. it measures the skill, not just scoring hits.
 
 #### 5.2 — GUNGE (`id:'gunge'`, `arc_gunge_best`, PALS[6] slime lime) ✅ SHIPPED (Unit 5.2)
 
@@ -318,12 +319,12 @@ As-shipped (this is the record; code in `index.html` is the source of truth):
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
-- **Daily length at 11 games.** Currently ~2× the 5–10 min target. Options: accept until the prune; or draw a **seeded subset** (N of 11 per day, same for everyone). Instrument first — decide on data.
+- **Daily length (now 8 games, heading to 11).** Already over the 5–10 min target and climbing as games land. Options: accept until the prune; or draw a **seeded subset** (N of 11 per day, same for everyone). Instrument first — decide on data.
 - **Final pars for all eleven** after playtesting. All `// PROVISIONAL`: STACK 20, SCAN 35, SWINGBALL 40, CHATTER 600, SCRAMBLE 120 *(likely too high post-R1)*, KNUCKLEBONES 90, HOWLER 500, GUNGE 300 *(now known too low — see next bullet)*, TAZO 400, DAIRY 250, WEAVER 200.
 - **GUNGE `par:300` is too low — the real par surprised me, and it moved after the timer buff.** Score is `remaining × segments`. Instrumented (seeded, both grid sizes): median path is **13 segments** (5×5, stages 0–2) / **17** (6×6, stage 3+); the shipped timer gives **48s → 21s**. So a single *cleanly-solved* board banks roughly `remaining(~25–35s) × segments(~13–17)` ≈ **300–500 points on its own**, and a multi-board run clears **1000–2500+**. At `par:300` the daily normaliser (`score/par × 250`, cap 625) **pegs the 625 cap for any competent player**, so GUNGE would dominate the daily total. Revised provisional guess: **~1200** (still a guess — needs real human play, not my sims). Two compounding causes I hadn't priced in: (a) `remaining × segments` is multiplicative, so long boards score super-linearly; (b) the 3× timer buff raised `remaining` across the board. **Retune `par` and re-measure once GUNGE has real play data.**
 - **GUNGE run length is now clock-loose.** With `TIME_FLOOR:21` a careful player can solve even a 6×6 well inside the clock, so fails come almost entirely from *mistakes*, not time — runs trend long and open-ended (endless + 3 lives, no time cap by D3). This feeds directly into the daily-length concern above; instrument GUNGE run length specifically when deciding the seeded-subset question. (If GUNGE runs too long, the lever is `par`/timer, not a time cap — D3 forbids caps.)
 - **Menu render has three parallel per-game palette maps, and a single render throw freezes the whole app** — surfaced when GUNGE shipped. `PALMAP`, `drawMenuIcon`'s lookup, **and** `drawMenu`'s card lookup are three separate hardcoded id→palette objects; missing GUNGE from the third made `p.acc` throw, and because the `requestAnimationFrame` loop only re-arms at the *end* of `frame()`, that one exception bricked the entire menu (drew 3 cards, died on the 4th). Fixed by adding `gunge` to all three **plus `||PALS[2]` / `||PALS[0]` fallbacks** so a future missing game degrades instead of crashing. Two open follow-ups: (a) consolidate the three maps into one `gamePal(id)` helper so adding game #8 can't reintroduce this; (b) consider wrapping the `frame()` body in try/catch so one bad frame drops instead of freezing forever — deferred (could mask real bugs; the fallbacks already remove the known trigger).
-- **HOWLER's whistle window** — the spec's 1.5–1.8 px/ms is not calibrated for 360×640. Must be measured on-device, not guessed.
+- **HOWLER's whistle window** — the spec's 1.5–1.8 px/ms is not calibrated for 360×640. Must be measured on-device, not guessed. **Unit 4 shipped the calibration *harness* (`HOWLER.CALIBRATE` flag → logs logical-px/ms `vel` distribution) plus a marked-PROVISIONAL synthetic placeholder (`VREF 2.0`, band `1.85–2.15`). The on-device pass is still owed** — no human-throw data was available this session. Same for `par:500`.
 - **Which games get pruned next**, and the target roster size. CHAIN was first (D10).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
 - **New `PALS` entries for Phase 5** — ✅ added (Unit 2), after the CHATTER explicit-cycle fix that made growth safe. Four entries (`6` GUNGE, `7` TAZO, `8` DAIRY, `9` WEAVER); **GUNGE now ships on `6`** (retune with the roster), `7`/`8`/`9` hues **remain open** — provisional, retune per game. Drawing surfaces directly (asphalt-court precedent) is still available where a palette isn't warranted.
