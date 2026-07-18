@@ -2130,9 +2130,276 @@ const GUNGE={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  GAME: TAZO TYCOON  (Phase 5, Unit 5 — §5.3)
+//  Directional-swipe 2048 over chip-packet tazos. The hub's only pure
+//  spatial-strategy game — NO time pressure by nature (D3-friendly).
+//  Verb = COARSE swipe: press() records the origin, release() picks the
+//  dominant axis past DIR_THRESH → U/D/L/R. drag() is deliberately
+//  absent (D12/§5.3 — a 2048 board wants no live preview), so the router
+//  leaves cur.drag undefined and just streams press→release. tap() is
+//  only ever reached for ready-start / over-restart (router calls it on
+//  release when st!=='play') — gameplay never touches it.
+//
+//  ── ESCALATING SPAWN PRESSURE is a FIRST-CLASS mechanic (§5.3 makes it
+//  a design REQUIREMENT, not polish): an 11-game daily cannot carry a
+//  10-minute 2048 run. Two curves govern run length, both climbing as
+//  you play:
+//    (1) spawn COUNT  = min(SPAWN_CAP, 1 + floor(moves/SPAWN_K)) — tiles
+//        per move grow with MOVES (inevitable, skill-proof), so free
+//        space eventually collapses no matter how well you play.
+//    (2) spawn floor-TIER rises with SCORE (TIER_BANDS) — the board
+//        clots with holo/gold that a single low merge can't clear.
+//  The tier-4 MEGA SLAMMER is the opposing RELIEF valve: forming one
+//  (gold+gold) detonates the low-tier CLUTTER around it (orthogonal
+//  neighbours of tier ≤ SLAM_MAXTIER) and is consumed. Clearing only
+//  clutter makes the valve self-weaken late (fewer low tiles as the
+//  board climbs), so it extends play without becoming an infinite pump —
+//  the failure mode a full-radius detonation caused in sim. Retune the
+//  run length via SPAWN_K / TIER_BANDS (a time cap is forbidden — D3),
+//  NOT by nerfing the merge.
+//
+//  Numbers below are SIM-DERIVED this session (no human play): a headless
+//  replica measured greedy-optimal ≈3.3 min median run (p90 ≈10.8 min),
+//  random ≈2.8 min; a mega slammer forms in a typical run. par set so a
+//  careful daily run lands ~200–290 normalised (only god-runs peg 625) —
+//  the GUNGE-par lesson (§7). Flip CALIBRATE on to log real moves+seconds
+//  per run; ALL PROVISIONAL — retune with the roster (§7).
+//
+//  Loss = board full with NO legal merge in any direction: ONE terminal
+//  state. This is a DELIBERATE divergence from D14's "3-lives" reading —
+//  2048's natural loss is a single board-lock, par-normalisation still
+//  works on the resulting score, and D14 explicitly allows revisit.
+//  Seeded (D16-trivial — a 2048 board is always playable): spawn slots +
+//  tiers via srnd(), so the daily replays identically. Reuses drawBG /
+//  ready+over screens / burst+pop. (Section labels track FILE order — §7.)
+// ════════════════════════════════════════════════════════════════
+const TAZO_COL=[ // tier → disc colours (holo-blue family, PALS[7]); drawn, rule 4
+  {face:'#243357',edge:'#6a8cff',glow:'#6a8cff',pip:'#cdd8ff'}, // 0 plastic
+  {face:'#5a4620',edge:'#e0a84a',glow:'#ffcc66',pip:'#ffe6b0'}, // 1 cardboard
+  {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo
+  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold
+  {face:'#8a8ad0',edge:'#ffffff',glow:'#ffffff',pip:'#ffffff'}, // 4 mega slammer (transient — detonates on formation, never rests)
+];
+const TAZO={
+  id:'tazo', name:'TAZO TYCOON', tag:'SWIPE TO STACK SLAMMERS',
+  bestKey:'arc_tazo_best',
+  par:4500, // PROVISIONAL — sim-derived (greedy median ≈5257); retune with the roster (§5.6/§7)
+  ranks:[{s:0,t:'SWAPSIE ROOKIE'},{s:800,t:'LUNCHTIME TRADER'},{s:2500,t:'HOLO HOARDER'},{s:6000,t:'GOLD SLAMMER'},{s:14000,t:'TAZO TYCOON'}],
+
+  // ── board geometry (360×640 logical, rule 2) ────────────────────
+  N:4, GX:36, GY:198, CELL:66, GAP:6, // 4×66 + 3×6 = 282 wide, centred-ish
+
+  // ── swipe → direction ───────────────────────────────────────────
+  DIR_THRESH:30, // px — below this the gesture is a harmless no-op, no penalty (§8)
+
+  // ── ESCALATING SPAWN PRESSURE (first-class — ALL PROVISIONAL) ────
+  SPAWN_K:6,   // spawn count steps up every SPAWN_K moves
+  SPAWN_CAP:12,// hard ceiling on tiles/move (12 floods a 16-cell board fast)
+  MAX_TIER:4,  // 4 = mega slammer (transient, detonates on formation)
+  SLAM_MAXTIER:1, // detonation clears orthogonal neighbours up to this tier (clutter only)
+  // spawn floor-tier by score: rising score drops tier-0 so the board clots
+  TIER_BANDS:[
+    {s:0,   pool:[0,0,0,0,1]}, // mostly plastic
+    {s:60,  pool:[0,0,1,1,2]}, // cardboard creeps in
+    {s:180, pool:[0,1,1,2,2]}, // holo pressure
+    {s:360, pool:[1,1,2,2,3]}, // gold clutter, no more plastic
+  ],
+  MERGE_PTS:[0,3,8,20,0], // points for MERGING INTO tier t (t=4 scored via the slam)
+  SLAM_PTS:6,             // per cell a mega slammer clears (incl. itself)
+  SLIDE_T:0.09, BUMP_T:0.16, // animation seconds
+
+  CALIBRATE:false, // logs moves + seconds + score per run to console on game over (§7)
+
+  cellXY(i){ const r=Math.floor(i/this.N), c=i%this.N;
+    return {x:this.GX+c*(this.CELL+this.GAP), y:this.GY+r*(this.CELL+this.GAP)}; },
+  spawnCount(){ return Math.min(this.SPAWN_CAP, 1+Math.floor(this.moves/this.SPAWN_K)); },
+  tierPool(){ let b=this.TIER_BANDS[0]; this.TIER_BANDS.forEach(x=>{ if(this.score>=x.s) b=x; }); return b.pool; },
+
+  init(){
+    this.best=loadBest(this.bestKey); this.newBest=false;
+    this.score=0; this.moves=0; this.slams=0; this.topTier=0;
+    this.cells=new Array(this.N*this.N).fill(-1);        // logical board: tier or -1
+    this.bump=new Array(this.N*this.N).fill(0);          // per-cell merge/spawn scale bounce
+    this.slideFrom=new Array(this.N*this.N).fill(null);  // {dx,dy} px a tile slid from
+    this.slideT=0; this.shake=0; this.rejectFlash=0;
+    this.aim=null; this.startAt=performance.now();
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.spawnTiles(2);            // opening board
+    this.slideFrom.fill(null);     // no slide on the very first tiles
+    this.bump.fill(0);
+  },
+  start(){ this.st='play'; this.startAt=performance.now(); },
+  gameOver(){
+    this.st='over'; this.overAt=performance.now();
+    if(this.CALIBRATE){ const secs=((performance.now()-this.startAt)/1000).toFixed(1);
+      console.log('TAZO run: moves='+this.moves+' secs='+secs+' score='+this.score+' slams='+this.slams+' top='+this.topTier); }
+    sBad(); buzz(70); if(this.onOver) this.onOver();
+  },
+
+  // ── pointer stream (D12): press + release, drag ignored (§5.3) ───
+  press(x,y){ this.aim={x0:x,y0:y}; },
+  release(x,y){
+    const a=this.aim; this.aim=null;
+    if(!a || this.st!=='play') return; // pointercancel with no drag lands here → no-op below
+    const dx=x-a.x0, dy=y-a.y0;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<this.DIR_THRESH){ this.rejectFlash=1; sTick(0.02); return; } // §8 free no-op
+    const dir=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');
+    this.move(dir);
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // during play the router routes to press/release — never here (D12)
+  },
+
+  // cell indices of each line in dest→far order for a given direction
+  lines(dir){
+    const N=this.N, out=[];
+    for(let k=0;k<N;k++){ const ln=[];
+      for(let j=0;j<N;j++){
+        if(dir==='L') ln.push(k*N+j);
+        else if(dir==='R') ln.push(k*N+(N-1-j));
+        else if(dir==='U') ln.push(j*N+k);
+        else ln.push((N-1-j)*N+k); // 'D'
+      }
+      out.push(ln);
+    }
+    return out;
+  },
+  move(dir){
+    const N=this.N, next=new Array(N*N).fill(-1), from=new Array(N*N).fill(null), merges=[];
+    let moved=false;
+    for(const ln of this.lines(dir)){
+      const seq=[]; for(const idx of ln){ if(this.cells[idx]>=0) seq.push({t:this.cells[idx],src:idx}); }
+      const out=[];
+      for(let i=0;i<seq.length;i++){
+        if(i+1<seq.length && seq[i].t===seq[i+1].t && seq[i].t<this.MAX_TIER){
+          out.push({t:seq[i].t+1, src:seq[i].src, merged:true}); i++; // consume the pair (once per tile per move)
+        } else out.push({t:seq[i].t, src:seq[i].src, merged:false});
+      }
+      for(let pos=0;pos<out.length;pos++){
+        const destIdx=ln[pos], tile=out[pos];
+        next[destIdx]=tile.t;
+        if(tile.src!==destIdx || tile.merged){ const sc=this.cellXY(tile.src), dc=this.cellXY(destIdx); from[destIdx]={dx:sc.x-dc.x,dy:sc.y-dc.y}; }
+        if(tile.src!==destIdx) moved=true;
+        if(tile.merged){ moved=true; merges.push({idx:destIdx,tier:tile.t}); }
+      }
+    }
+    if(!moved){ this.rejectFlash=1; sTick(0.02); return; } // no change = free no-op (§8)
+    this.cells=next; this.slideFrom=from; this.slideT=1; this.moves++;
+    for(const m of merges){
+      this.bump[m.idx]=1; this.topTier=Math.max(this.topTier,m.tier);
+      const q=this.cellXY(m.idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
+      if(m.tier>=this.MAX_TIER){ this.detonate(m.idx); }
+      else {
+        this.score+=this.MERGE_PTS[m.tier];
+        pop('+'+this.MERGE_PTS[m.tier],cx,cy-6,TAZO_COL[m.tier].glow,7);
+        burst(cx,cy,TAZO_COL[m.tier].glow,7,2.6);
+      }
+    }
+    sHit(); this.clack(); buzz(8);
+    this.spawnTiles(this.spawnCount());  // ESCALATING SPAWN PRESSURE — after every effective move
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+    if(!this.hasMove()) this.gameOver();
+  },
+  detonate(idx){
+    this.slams++;
+    const N=this.N, r=Math.floor(idx/N), c=idx%N;
+    const q=this.cellXY(idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
+    let cleared=0;
+    for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){ // orthogonal clutter only
+      const rr2=r+dr, cc=c+dc; if(rr2<0||rr2>=N||cc<0||cc>=N) continue;
+      const j=rr2*N+cc;
+      if(this.cells[j]>=0 && this.cells[j]<=this.SLAM_MAXTIER){ this.cells[j]=-1; cleared++;
+        const w=this.cellXY(j); burst(w.x+this.CELL/2,w.y+this.CELL/2,'#a6c8ff',6,2.4); }
+    }
+    this.cells[idx]=-1; // the slammer is consumed (transient tier-4)
+    const pts=this.SLAM_PTS*(cleared+1); this.score+=pts;
+    pop('SLAM! +'+pts,cx,cy-8,'#ffffff',9);
+    burst(cx,cy,'#ffffff',18,3.6); this.shake=1; sGold(); buzz(30);
+  },
+  spawnTiles(n){
+    const empties=[]; for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) empties.push(i);
+    const pool=this.tierPool(); n=Math.min(n,empties.length);
+    for(let k=0;k<n;k++){
+      const idx=empties.splice(Math.floor(srnd(this)*empties.length),1)[0];
+      this.cells[idx]=pool[Math.floor(srnd(this)*pool.length)];
+      this.bump[idx]=0.7; // gentle spawn pop
+    }
+  },
+  hasMove(){
+    const N=this.N;
+    for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) return true;
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++){ const t=this.cells[r*N+c];
+      if(c+1<N && this.cells[r*N+c+1]===t && t<this.MAX_TIER) return true;
+      if(r+1<N && this.cells[(r+1)*N+c]===t && t<this.MAX_TIER) return true;
+    }
+    return false;
+  },
+  clack(){ beep(180,0.03,'square',0.05); beep(120,0.045,'triangle',0.04); }, // plastic tazo clack
+
+  update(dt){
+    if(this.rejectFlash>0) this.rejectFlash-=dt*3;
+    if(this.shake>0) this.shake-=dt*3;
+    if(this.slideT>0) this.slideT=Math.max(0,this.slideT-dt/this.SLIDE_T);
+    for(let i=0;i<this.bump.length;i++) if(this.bump[i]>0) this.bump[i]=Math.max(0,this.bump[i]-dt/this.BUMP_T);
+  },
+
+  drawTazo(cx,cy,tier,s){
+    const col=TAZO_COL[tier], R=this.CELL*0.44*s;
+    ctx.save(); ctx.translate(cx,cy);
+    const g=ctx.createRadialGradient(-R*0.3,-R*0.35,R*0.2,0,0,R);
+    g.addColorStop(0,col.edge); g.addColorStop(0.5,col.face); g.addColorStop(1,'#0a0f1e');
+    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle=col.edge; ctx.lineWidth=2.5; ctx.shadowColor=col.glow; ctx.shadowBlur=tier>=2?9:3;
+    ctx.beginPath(); ctx.arc(0,0,R-1.5,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(0,0,R*0.6,0,Math.PI*2); ctx.stroke();
+    drawMark(0,0,R*0.86,col.pip); // brand mark centre — hub cohesion (drawn, rule 4)
+    ctx.restore();
+  },
+  render(){
+    const p=PALS[7], N=this.N;
+    let ox=0,oy=0;
+    if(this.shake>0){ ox=(Math.random()-0.5)*7*this.shake; oy=(Math.random()-0.5)*7*this.shake; }
+    ctx.save(); ctx.translate(ox,oy);
+    drawBG(p,H-30);
+    const span=N*this.CELL+(N-1)*this.GAP, pad=8;
+    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14);
+    ctx.fillStyle='rgba(6,10,26,0.72)'; ctx.fill();
+    ctx.globalAlpha=this.rejectFlash>0?0.85:0.5; ctx.strokeStyle=this.rejectFlash>0?'#ff6a8a':p.ring; ctx.lineWidth=2;
+    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14); ctx.stroke(); ctx.globalAlpha=1;
+    for(let i=0;i<N*N;i++){ const q=this.cellXY(i);
+      rr(q.x,q.y,this.CELL,this.CELL,10); ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fill(); }
+    for(let i=0;i<N*N;i++){ if(this.cells[i]<0) continue;
+      const q=this.cellXY(i); let dx=0,dy=0;
+      if(this.slideT>0 && this.slideFrom[i]){ const e=this.slideT*this.slideT; dx=this.slideFrom[i].dx*e; dy=this.slideFrom[i].dy*e; }
+      const b=this.bump[i], scl=1+(b>0?Math.sin((1-b)*Math.PI*2)*0.16*b:0); // double-strike bounce
+      this.drawTazo(q.x+this.CELL/2+dx,q.y+this.CELL/2+dy,this.cells[i],scl);
+    }
+    drawFX();
+    ctx.restore();
+    // HUD (unshaken)
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,80); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,100);
+    const spc=this.st==='play'?this.spawnCount():1; // surface the escalation to the player
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle=spc>=4?'#ff6a8a':spc>=2?'#ffd24a':'rgba(255,255,255,0.4)';
+    ctx.fillText('SPAWN ×'+spc,W/2,118);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rankFor(this.ranks,this.score).t,W/2,H-14);
+    if(this.CALIBRATE){ ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#8aff8a'; ctx.textAlign='left';
+      ctx.fillText('mv='+this.moves+' spc='+spc+' sl='+this.slams,8,H-30); }
+    if(this.st==='ready') drawReadyScreen(p,'TAZO TYCOON',['SWIPE TO SLIDE THE TAZOS','MATCH TWO TO TRADE UP A TIER','GOLD+GOLD = MEGA SLAMMER','BOARD FILLS FASTER AS YOU CLIMB']);
+    if(this.st==='over') drawOverScreen(p,'BOARD LOCKED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'MOVES '+this.moves+' · '+this.slams+' SLAMS');
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -2157,7 +2424,7 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 const GAUNTLET={
   // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
-  PALMAP:{stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,scramble:4,bones:5}, // HOWLER reuses PALS[0] (§5.1). PALS[2] freed by CHAIN prune = hub palette
+  PALMAP:{stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,bones:5}, // HOWLER reuses PALS[0] (§5.1). TAZO on PALS[7] holo-blue. PALS[2] freed by CHAIN prune = hub palette
   gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   beginDaily(){
@@ -2386,7 +2653,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
+  const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],tazo:PALS[7],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -2462,6 +2729,16 @@ function drawMenuIcon(g,cx,cy){
       [[-8,-4],[-8,4],[8,-4],[8,4]].forEach(k=>{ ctx.beginPath(); ctx.arc(k[0],k[1],2.4,0,Math.PI*2); ctx.fill(); });
       ctx.restore();
     });
+  } else if(g.id==='tazo'){
+    // a fanned stack of collectible tazo discs, holo on top (rule 4 — all drawn)
+    [[-9,7,'#243357'],[0,2,'#e0a84a'],[9,-4,'#3ae8ff']].forEach((d,i)=>{
+      ctx.beginPath(); ctx.arc(d[0],d[1],14,0,Math.PI*2); ctx.fillStyle='#0a0f1e'; ctx.fill();
+      if(i===2){ ctx.shadowColor='#7affff'; ctx.shadowBlur=9; }
+      ctx.beginPath(); ctx.arc(d[0],d[1],12,0,Math.PI*2); ctx.fillStyle=d[2]; ctx.fill(); ctx.shadowBlur=0;
+      ctx.strokeStyle='rgba(255,255,255,0.4)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(d[0],d[1],7,0,Math.PI*2); ctx.stroke();
+    });
+    drawMark(9,-4,14,'#0a0f1e');
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
@@ -2529,7 +2806,7 @@ function drawMenu(){
   if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
+    const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],tazo:PALS[7],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
