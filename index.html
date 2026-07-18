@@ -1678,7 +1678,7 @@ const GUNGE={
   par:300, // PROVISIONAL — pure guess against remaining×segments; instrument early
   ranks:[{s:0,t:'STUDIO AUDIENCE'},{s:150,t:'BUCKET CATCHER'},{s:400,t:'PIPE PLUMBER'},{s:800,t:'VALVE MASTER'},{s:1400,t:'GUNGE TANK LEGEND'}], // PROVISIONAL
   GX:30, GY:150, GRID_PX:300,           // grid box (logical px); cell size derives from N
-  TIME_BASE:16, TIME_STEP:1.2, TIME_FLOOR:7, // per-board countdown (s) — PROVISIONAL
+  TIME_BASE:48, TIME_STEP:3.6, TIME_FLOOR:21, // per-board countdown (s) — PROVISIONAL (3× the original 16/1.2/7 — owner asked for more solve time)
   FILL_STEP:0.055,                      // seconds per cell of the release animation
   PW:0.30,                              // pipe width as a fraction of the cell
   // Direction bits: N=1 E=2 S=4 W=8. Shapes (base masks): straight 5, elbow 3, tee 7, dead 1.
