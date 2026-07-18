@@ -2400,6 +2400,14 @@ const TAZO={
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
 const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,KNUCKLEBONES]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER
+// ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
+// Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
+// the persisted daily pid all read through gamePal/PALMAP, so a missing
+// entry degrades to the hub palette (PALS[2]) instead of throwing and
+// freezing the whole frame loop (the crash that shipped with GUNGE).
+// HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,bones:5};
+function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
 GAMES.forEach(g=>g.init());
@@ -2424,8 +2432,7 @@ function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getIte
 const GAUNTLET={
   // Daily-only (Phase 4.5 R3): the free-play gauntlet is gone — TUCK SHOP RUN is the only gauntlet.
   CAP:625, NORM:250,
-  PALMAP:{stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,bones:5}, // HOWLER reuses PALS[0] (§5.1). TAZO on PALS[7] holo-blue. PALS[2] freed by CHAIN prune = hub palette
-  gamePal(g){ const i=this.PALMAP[g.id]; return PALS[i!=null?i:2]; },
+  // palette lookup uses the module-level PALMAP/gamePal (§7 single source of truth)
   contribOf(score,par){ return Math.min(this.CAP,Math.round(score/(par||1)*this.NORM)); },
   beginDaily(){
     const dk=dayKeyOf(new Date());
@@ -2458,7 +2465,7 @@ const GAUNTLET={
   },
   capture(){
     const g=cur, score=Math.floor(g.score||0);
-    this.results.push({name:g.name, id:g.id, score, contrib:this.contribOf(score,g.par), rank:rankFor(g.ranks,score).t, pal:this.gamePal(g)});
+    this.results.push({name:g.name, id:g.id, score, contrib:this.contribOf(score,g.par), rank:rankFor(g.ranks,score).t, pal:gamePal(g.id)});
     this.total+=this.results[this.results.length-1].contrib;
     g.onOver=null;                    // one-shot — guards double-fire
     this.overAt=performance.now();
@@ -2473,7 +2480,7 @@ const GAUNTLET={
     this.streak=(loadStr('arc_daily_lastdone')===yk)?loadBest('arc_daily_streak')+1:1;
     saveBest('arc_daily_streak',this.streak); saveStr('arc_daily_lastdone',this.dayKey);
     this.emojiGrid=this.buildEmojiGrid();
-    const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:this.PALMAP[r.id]!=null?this.PALMAP[r.id]:2}));
+    const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:PALMAP[r.id]!=null?PALMAP[r.id]:2}));
     saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
     refreshDaily(); sGold(); // refresh the tile's cached daily state
   },
@@ -2653,7 +2660,7 @@ function drawArrow(r,dir){ // drawn triangle (rule 4 — no glyphs)
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawMenuIcon(g,cx,cy){
-  const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],tazo:PALS[7],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[0];
+  // (no palette lookup — every branch below hardcodes its own colours)
   ctx.save(); ctx.translate(cx,cy);
   if(g.id==='stack'){
     [[-20,8,40],[-15,-6,30],[-11,-20,22]].forEach(b=>{
@@ -2806,7 +2813,7 @@ function drawMenu(){
   if(menuPage===0) drawDailyTile();
   menuCards().forEach(card=>{
     const g=card.g;
-    const p={stack:PALS[0],scan:PALS[1],howler:PALS[0],swing:PALS[3],gunge:PALS[6],chatter:PALS[3],tazo:PALS[7],scramble:PALS[4],bones:PALS[5]}[g.id]||PALS[2];
+    const p=gamePal(g.id)||PALS[2];
     const pulse=0.86+0.14*Math.sin(tick*0.05+card.y*0.02);
     const cg=ctx.createLinearGradient(card.x,card.y,card.x,card.y+card.h);
     cg.addColorStop(0,p.acc+'26'); cg.addColorStop(1,'#0c0c14');
