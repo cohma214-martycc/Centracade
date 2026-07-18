@@ -680,7 +680,16 @@ const HOWLER={
   id:'howler', name:'HOWLER', tag:'SWIPE TO LAUNCH',
   bestKey:'arc_howler_best',
   par:500, // PROVISIONAL — pure guess vs ~100/hit; instrument before trusting (§7)
-  ranks:[{s:0,t:'BACKYARD ARM'},{s:250,t:'OVER THE CLOTHESLINE'},{s:650,t:'ONTO THE GARAGE ROOF'},{s:1200,t:"NEXT DOOR'S SECTION"},{s:2000,t:'GONE OVER THE FENCE'},{s:3200,t:'WHISTLER'}],
+  // Rank titles echo the distance ladder (2003 Dan Carter / Steve Devine
+  // Mega Howler ad). Thresholds unchanged — display-only, par untouched.
+  ranks:[{s:0,t:'BACKYARD ARM'},{s:250,t:'30 METRE CLUB'},{s:650,t:'60 METRE CLUB'},{s:1200,t:'90 METRE CLUB'},{s:2000,t:'ULTIMATE DISTANCE'},{s:3200,t:'WHISTLER'}],
+
+  // ── distance ladder (the ad's four steps) ────────────────────────
+  // Named milestones over the CONTINUOUS per-hit difficulty ramp — not
+  // levels, so D14 (endless + 3 lives) holds: ULTIMATE DISTANCE is a
+  // floor-less top tier that ramps forever, nothing "ends" at the top.
+  TIER_HITS:3, // PROVISIONAL — scoring hits per named tier before advancing
+  TIERS:['30 M','60 M','90 M','ULTIMATE DISTANCE'],
 
   // ── swipe → throw calibration (ALL PROVISIONAL) ──────────────────
   // vel is LOGICAL px/ms in the 360×640 space (getXY already maps into
@@ -705,6 +714,7 @@ const HOWLER={
   // ── wind (drawn arrows, per-frame lateral accel, seeded) ─────────
   WIND_BASE:90, WIND_STEP:45, WIND_CAP:340, // px/s² // PROVISIONAL
 
+  tier(){ return Math.min(3, Math.floor(this.stage/this.TIER_HITS)); },
   centerR(){ return Math.max(11, 22 - this.stage*1.4); },
   rimR(){ return Math.max(26, 46 - this.stage*2.2); },
   windStrength(){ return Math.min(this.WIND_CAP, this.WIND_BASE + this.stage*this.WIND_STEP); },
@@ -726,7 +736,14 @@ const HOWLER={
   },
   start(){ this.st='play'; },
   gameOver(){ this.st='over'; this.overAt=performance.now(); this.rocket=null; this.aim=null; sBad(); buzz(70); if(this.onOver) this.onOver(); },
-  stageUp(){ this.stage++; sStage(); this.placeTarget(); },
+  // Fanfare belongs to tier crossings only — ordinary stage-ups keep the
+  // hit sound from resolve(), so the ladder moments stand out.
+  stageUp(){
+    const prev=this.tier();
+    this.stage++;
+    if(this.tier()>prev){ sStage(); pop(this.TIERS[this.tier()]+'!',W/2,210,'#ffd24a',9); buzz(30); }
+    this.placeTarget();
+  },
 
   // ── pointer stream (D12) — the whole point of Unit 4 ─────────────
   press(x,y){ if(this.rocket) return; this.aim={x0:x,y0:y,t0:performance.now(),cx:x,cy:y}; },
@@ -814,13 +831,16 @@ const HOWLER={
     ctx.restore();
   },
   drawRocket(x,y,s){
+    // Owner-spec livery: purple body, green/teal fins. Literal hexes on a
+    // drawn object (GUNGE-surface precedent) — NOT reads of PALS[2], which
+    // stays the reserved hub palette. Card/HUD/ghost stay ember (PALMAP 0).
     ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
-    rr(-9,-14,18,30,9); ctx.fillStyle='#140a08'; ctx.fill();
+    rr(-9,-14,18,30,9); ctx.fillStyle='#0e0616'; ctx.fill();
     const g=ctx.createLinearGradient(-9,0,9,0);
-    g.addColorStop(0,'#c04808'); g.addColorStop(0.5,'#ff7a32'); g.addColorStop(1,'#c04808');
+    g.addColorStop(0,'#4a1e8a'); g.addColorStop(0.5,'#8a4ae0'); g.addColorStop(1,'#4a1e8a');
     rr(-7,-12,14,26,7); ctx.fillStyle=g; ctx.fill();
     ctx.fillStyle='#f0e0c0'; ctx.beginPath(); ctx.moveTo(-7,-8); ctx.quadraticCurveTo(0,-23,7,-8); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#e85d15';
+    ctx.fillStyle='#2ad8b0';
     ctx.beginPath(); ctx.moveTo(-7,6); ctx.lineTo(-13,14); ctx.lineTo(-7,14); ctx.closePath(); ctx.fill();
     ctx.beginPath(); ctx.moveTo(7,6); ctx.lineTo(13,14); ctx.lineTo(7,14); ctx.closePath(); ctx.fill();
     ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,13,4,0,Math.PI*2); ctx.stroke();
@@ -880,7 +900,9 @@ const HOWLER={
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
     for(let i=0;i<3;i++){ const lx=W/2-30+i*30; ctx.globalAlpha=i<this.lives?1:0.18; this.drawRocket(lx,112,0.5); ctx.globalAlpha=1; }
     this.drawWind();
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.textAlign='center';
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.textAlign='center';
+    ctx.fillText(this.TIERS[this.tier()],W/2,152); // current ladder tier
+    ctx.fillStyle=p.ring;
     ctx.fillText(rankFor(this.ranks,this.score).t,W/2,H-14);
     if(this.CALIBRATE && this.velLog.length){
       const mn=Math.min(...this.velLog), mx=Math.max(...this.velLog);
@@ -889,7 +911,7 @@ const HOWLER={
       ctx.fillText('min '+mn.toFixed(2)+' max '+mx.toFixed(2),8,H-30);
     }
     if(this.st==='ready') drawReadyScreen(p,'HOWLER',['SWIPE UP TO HURL THE HOWLER','HARDER = FARTHER — FIND THE WHISTLE','MIND THE WIND · 3 MISSES = OUT']);
-    if(this.st==='over') drawOverScreen(p,'HOWLER DOWN',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1)+' · '+this.whistles+' WHISTLES');
+    if(this.st==='over') drawOverScreen(p,'HOWLER DOWN',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,this.TIERS[this.tier()]+' · '+this.whistles+' WHISTLES');
   }
 };
 
@@ -3275,12 +3297,12 @@ function drawMenuIcon(g,cx,cy){
     ctx.save(); ctx.rotate(-0.5);
     ctx.strokeStyle=PALS[0].glow+'99'; ctx.lineWidth=2; ctx.lineCap='round';
     for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-8+i*3,16-i*2); ctx.lineTo(-2+i*3,9-i*2); ctx.stroke(); }
-    rr(-8,-15,16,28,8); ctx.fillStyle='#140a08'; ctx.fill();
+    rr(-8,-15,16,28,8); ctx.fillStyle='#0e0616'; ctx.fill();
     const g2=ctx.createLinearGradient(-8,0,8,0);
-    g2.addColorStop(0,'#c04808'); g2.addColorStop(0.5,'#ff7a32'); g2.addColorStop(1,'#c04808');
+    g2.addColorStop(0,'#4a1e8a'); g2.addColorStop(0.5,'#8a4ae0'); g2.addColorStop(1,'#4a1e8a'); // purple body + teal fins — matches drawRocket livery
     rr(-6,-13,12,24,6); ctx.fillStyle=g2; ctx.fill();
     ctx.fillStyle='#f0e0c0'; ctx.beginPath(); ctx.moveTo(-6,-9); ctx.quadraticCurveTo(0,-22,6,-9); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#e85d15';
+    ctx.fillStyle='#2ad8b0';
     ctx.beginPath(); ctx.moveTo(-6,5); ctx.lineTo(-12,13); ctx.lineTo(-6,13); ctx.closePath(); ctx.fill();
     ctx.beginPath(); ctx.moveTo(6,5); ctx.lineTo(12,13); ctx.lineTo(6,13); ctx.closePath(); ctx.fill();
     ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(0,11,3.5,0,Math.PI*2); ctx.stroke();
