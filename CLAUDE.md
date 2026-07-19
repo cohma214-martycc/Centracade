@@ -169,7 +169,7 @@ CHATTER is the only palette-cycling game; its cycle is the **explicit list** `CH
 - **BUG B1 fix — WEAVER daily determinism ✅ SHIPPED**: seeded streams split — a per-stage board RNG (`brnd`, `mulberry32(dailySeed ^ 'weaver-board' ^ (stage+1)·C)`, consumed only by `carve`/`genBoard`/`rollBoats`, fixed counts) and a separate persistent hazard RNG (`hrnd`) for flares. The Nth flare's route stays shared; boards 1..k are now identical for every player regardless of pace. Free play unchanged (`Math.random`). Flare site carries a §3 pointer so this class of bug doesn't ship again.
 - **Dead-code sweep** (§8 B2) ✅ SHIPPED: removed `dailyPlayedToday()`, `HOWLER.lastOutcome`, `CHATTER.nextStageAt`, `CHATTER.perfects`, and the dead `GAUNTLET.tap` 'playing' branch.
 - **Source restructure** (closes the §7 open item): reorder the game object blocks in the file to match `GAMES` order and **drop the `GAME N` numbers from the section banners** (keep the names). Comment-only churn; do it in its own commit so the diff is legible.
-- **Copy fix**: the interstitial header still says `GAUNTLET` — change to `DAILY_NAME` (the free-play gauntlet is long gone).
+- **Copy fix** ✅ SHIPPED: the interstitial header now reads `DAILY_NAME` (was the stale `GAUNTLET`).
 
 #### 6.1 — HOWLER refinement (owner: "very hard" + sprite wrong)
 
@@ -304,7 +304,7 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 
 - **B1 — WEAVER daily determinism bug. ✅ FIXED (6.0).** `spawnFlare` consumed seeded draws mid-board; flare count depends on player pace, so the shared stream drifted and players got **different boards from board 2 onward in the same daily**. Fixed by splitting the seeded stream: per-stage board stream (`brnd`, fixed draw count) + separate persistent hazard stream (`hrnd`) for flares. Verified headless — boards byte-identical across pace, Nth flare route shared. GUNGE/DAIRY/BONES/HOWLER were always safe (fixed draw counts per board/piece/throw); TAZO/SCAN divergence is inherent and acceptable.
 - **B2 — Dead code. ✅ SWEPT (6.0):** removed `dailyPlayedToday()` (tile reads `dailyCache`), `HOWLER.lastOutcome` (written, never read), `CHATTER.nextStageAt` (init-only relic), `CHATTER.perfects` (counted, never shown), and `GAUNTLET.tap`'s `state==='playing'` branch (play input routes through `gameDown`). `CHATTER.restrikes`/`drops` kept — restrikes shows on the over-screen; drops was out of B2's named scope.
-- **B3 — Interstitial header says `GAUNTLET`** — stale copy from the free-play era; use `DAILY_NAME` (6.0).
+- **B3 — Interstitial header. ✅ FIXED (6.0)** — now renders `DAILY_NAME` instead of the stale `GAUNTLET`.
 - **B4 — `GAME N` source labels** — track file order, not roster order, and lie about it. Resolved by the 6.0 source reorder (drop the numbers, keep the names).
 - **B5 — `frame()` try/catch — still deferred, deliberately.** One thrown frame kills the rAF loop (the GUNGE-launch freeze); the single-`PALMAP`-with-fallback fix removed the known trigger. A catch-and-drop-frame wrapper could mask real bugs — revisit only if another freeze class appears. Record kept so future sessions don't re-litigate blind.
 - **B6 — Press-game ready/over latency (accepted, documented).** For games declaring `press`, ready-start and over-restart fire on *release*, not pointerdown — a one-frame-feel delay vs tap games. Cost of the D12 contract; do not special-case.
