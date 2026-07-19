@@ -329,7 +329,7 @@ function drawReadyScreen(p,name,lines){
 }
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 1: STACK
+//  STACK
 // ════════════════════════════════════════════════════════════════
 const STACK={
   id:'stack', name:'STACK', tag:'BUILD THE TOWER',
@@ -474,7 +474,7 @@ const STACK={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 2: SCAN  (uplifted — faithful mark, 16-bit paint)
+//  SCAN  (uplifted — faithful mark, 16-bit paint)
 // ════════════════════════════════════════════════════════════════
 const SCAN={
   id:'scan', name:'SCAN', tag:'BEAM THE PAYMENTS',
@@ -701,7 +701,7 @@ const SCAN={
 //  / over-restart — the router calls it on release when st!=='play';
 //  gameplay never touches tap(). Pseudo-3D is scale + a y-offset arc,
 //  no matrices (the BONES frame-flip precedent). Endless + 3 lives (D14).
-//  (File section labels track FILE order, not the GAMES/daily order — §7.)
+//  (Source blocks now ordered to match GAMES/daily order — Unit 6.0.)
 // ════════════════════════════════════════════════════════════════
 const HOWLER={
   id:'howler', name:'HOWLER', tag:'SWIPE TO LAUNCH',
@@ -943,7 +943,507 @@ const HOWLER={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 3: CHATTER  (the 90s NZ playground classic)
+//  SWINGBALL  (endless tetherball — wind the rope up the pole)
+//  Ring-timing core originated with CHAIN (pruned in Phase 5); SWINGBALL
+//  now owns it as the reference implementation, and is a separate game (D1):
+//  a spiral WIND meter is the differentiator; filling it banks a LOOP
+//  (score multiplier +1) and steps difficulty up. Only a miss/break ends it.
+// ════════════════════════════════════════════════════════════════
+const SWINGBALL={
+  id:'swing', name:'SWINGBALL', tag:'WIND IT UP',
+  spaceTap:true, // positionless — safe to trigger from the spacebar
+  bestKey:'arc_swing_best', // fresh key — never inherits CHAIN's history (D1)
+  par:40, // PROVISIONAL — retune from play data
+  ranks:[{s:0,t:'DRIVEWAY DEBUT'},{s:15,t:'TIP AND RUN'},{s:35,t:'ONE HAND ONE BOUNCE'},{s:60,t:'SIX AND OUT'},{s:100,t:'OVER THE FENCE'},{s:160,t:'AUTO WICKY'},{s:240,t:'JANDAL SLOGGER'},{s:350,t:'BACKYARD TEST LEGEND'}],
+  CX:W/2, CY:300, RX:126, RY:54, COILS:6, // R4: 45° ellipse view
+  POLE_TOP:120, POLE_BOT:470,
+  START_SPEED:1.7, SPEED_INC:0.05, SPEED_CAP:4.2,
+  START_ZONE:0.42, ZONE_SHRINK:0.012, ZONE_FLOOR:0.14,
+  PERFECT_FRAC:0.33, SLOP:1.7,
+  WIND_MAX:100, WIND_HIT:20, WIND_PERFECT:30, WIND_MISS:25,
+  LOOP_SPEED_STEP:0.25, LOOP_ZONE_STEP:0.03,
+  init(){
+    this.baseSpeed=this.START_SPEED; this.baseZone=this.START_ZONE;
+    this.angle=-Math.PI/2; this.dir=1; this.speed=this.baseSpeed;
+    this.zoneC=wrap(this.angle+2.2); this.zoneHalf=this.baseZone;
+    this.wasInside=false;
+    this.wind=0; this.loop=0;
+    this.score=0; this.hits=0;
+    this.timeScale=1; this.shake=0; this.grace=0; this.flash=0; this.wobble=0;
+    this.best=loadBest(this.bestKey); // no legacy arg — no CHAIN inheritance
+    this.newBest=false; this.trail=[]; this.ghosts=[]; this.banner=null;
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[3]; }, // backyard green (gold accents added inline)
+  mult(){ return 1+this.loop; },
+  start(){ this.st='play'; },
+  ballPos(a){ return {x:this.CX+Math.cos(a)*this.RX, y:this.CY+Math.sin(a)*this.RY}; }, // R4 ellipse
+  poleSway(){ return Math.sin(tick*0.45)*6*this.wobble; }, // cap+coil sway on a hit (shaft stays planted)
+  placeZone(){
+    this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
+    this.wasInside=false;
+  },
+  bankLoop(){
+    this.loop++; this.wind=0; this.flash=1;
+    this.baseSpeed=Math.min(this.SPEED_CAP,this.baseSpeed+this.LOOP_SPEED_STEP);
+    this.baseZone=Math.max(this.ZONE_FLOOR,this.baseZone-this.LOOP_ZONE_STEP);
+    this.speed=this.baseSpeed; this.zoneHalf=this.baseZone;
+    this.timeScale=0.35; this.grace=0.3; // grace through the slow-mo
+    this.banner={t:'LOOP ×'+this.mult()+'!',life:1.5};
+    burst(this.CX,this.CY,'#ffd24a',24,5); burst(this.CX,this.CY,'#fff',8,3);
+    sStage(); buzz(30); this.shake=6;
+  },
+  clean(d){
+    const perfect=Math.abs(d)<=this.zoneHalf*this.PERFECT_FRAC;
+    const gain=(perfect?2:1)*this.mult();
+    this.score+=gain;
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); }
+    this.hits++;
+    const pos=this.ballPos(this.angle);
+    this.ghosts.push({a:this.zoneC,life:1,c:perfect?'#ffffff':this.pal().glow});
+    if(perfect){ burst(pos.x,pos.y,'#ffffff',12,3.6); pop('PERFECT +'+gain,pos.x,pos.y-26,'#ffffff',7); sPerfect(); buzz(18); }
+    else { burst(pos.x,pos.y,this.pal().glow,9,2.8); pop('+'+gain,pos.x,pos.y-24,this.pal().ring,7); sHit(); buzz(12); }
+    this.speed=Math.min(this.SPEED_CAP,this.speed+this.SPEED_INC);
+    this.zoneHalf=Math.max(this.ZONE_FLOOR,this.zoneHalf-this.ZONE_SHRINK);
+    this.wind+=perfect?this.WIND_PERFECT:this.WIND_HIT;
+    if(this.wind>=this.WIND_MAX) this.bankLoop();
+    this.dir*=-1; this.wobble=1; // R4: wobble the cap+coil on every hit
+    this.placeZone();
+  },
+  mistime(){
+    const pos=this.ballPos(this.angle);
+    this.wind=Math.max(0,this.wind-this.WIND_MISS); // rope unwinds, but you survive
+    burst(pos.x,pos.y,'#ff9a3a',7,2.4);
+    pop('UNWIND',pos.x,pos.y-22,'#ff9a3a',6);
+    beep(300,0.12,'sawtooth',0.04,180); buzz(10);
+    this.shake=Math.max(this.shake,3);
+    this.dir*=-1; this.wobble=1;
+    this.placeZone();
+  },
+  breakRope(){
+    if(this.grace>0) return; // loop-bank grace period: no breaks
+    const pos=this.ballPos(this.angle);
+    burst(pos.x,pos.y,'#ff4455',22,5); burst(pos.x,pos.y,'#fff',8,3);
+    this.shake=10; sBad(); buzz(70);
+    this.overAt=performance.now(); this.st='over';
+    if(this.onOver) this.onOver();
+  },
+  update(dt){
+    this.timeScale+=(1-this.timeScale)*0.055;
+    this.shake*=0.82;
+    if(this.flash>0) this.flash-=0.04;
+    if(this.grace>0) this.grace-=dt;
+    if(this.wobble>0) this.wobble=Math.max(0,this.wobble-dt*1.8);
+    if(this.st==='play'){
+      // overshoot/miss detection: the wasInside/sign-crossing core (CHAIN was
+      // the original; this is now the reference implementation) — edit with care.
+      const prevD=wrap(this.angle-this.zoneC);
+      this.angle=wrap(this.angle+this.dir*this.speed*dt*this.timeScale);
+      const d=wrap(this.angle-this.zoneC);
+      const inside=Math.abs(d)<=this.zoneHalf;
+      if(inside){ this.wasInside=true; }
+      else if(this.wasInside){
+        if(Math.sign(d)===Math.sign(this.dir)) this.breakRope();
+        this.wasInside=false;
+      } else {
+        if(Math.sign(prevD)!==Math.sign(d)&&Math.abs(prevD)>this.zoneHalf&&Math.abs(d)>this.zoneHalf&&Math.abs(prevD-d)<Math.PI) this.breakRope();
+      }
+    } else if(this.st==='ready'){
+      this.angle=wrap(this.angle+this.dir*0.9*dt);
+    }
+    this.ghosts.forEach(g2=>g2.life-=0.03); this.ghosts=this.ghosts.filter(g2=>g2.life>0);
+    if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
+  },
+  drawPole(){
+    const p=this.pal();
+    // planted shaft (never sways)
+    rr(this.CX-6,this.POLE_TOP,12,this.POLE_BOT-this.POLE_TOP+8,5); ctx.fillStyle='#3a2a16'; ctx.fill();
+    rr(this.CX-6,this.POLE_TOP,4,this.POLE_BOT-this.POLE_TOP+8,3); ctx.fillStyle='#5a4324'; ctx.fill();
+    // cap + rope coil sway together on a hit (R4)
+    const sx=this.CX+this.poleSway();
+    rr(sx-9,this.POLE_TOP-6,18,8,3); ctx.fillStyle=p.acc; ctx.fill();
+    // wind meter = a coil of rope rings stacked under the cap; round(wind/MAX*COILS) lit
+    const lit=Math.round(this.wind/this.WIND_MAX*this.COILS);
+    const gold=this.wind>=this.WIND_MAX*0.75;
+    for(let i=0;i<this.COILS;i++){
+      const y=this.POLE_TOP+8+i*7, on=i<lit, col=on?(gold?'#ffd24a':p.glow):'rgba(255,255,255,0.14)';
+      ctx.save(); if(on){ ctx.shadowColor=col; ctx.shadowBlur=6+8*this.flash; }
+      ctx.strokeStyle=col; ctx.lineWidth=2.5;
+      ctx.beginPath(); ctx.ellipse(sx,y,8,3,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    }
+  },
+  drawBall(){
+    const p=this.pal(), pos=this.ballPos(this.angle), sx=this.CX+this.poleSway();
+    // rope: pole-top (swaying cap) → ball, every frame
+    ctx.strokeStyle='rgba(240,230,200,0.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(sx,this.POLE_TOP-2); ctx.lineTo(pos.x,pos.y); ctx.stroke();
+    // trail (faint, behind the ball)
+    this.trail.forEach((t2,i)=>{
+      const f=i/this.trail.length;
+      ctx.globalAlpha=f*0.30; ctx.fillStyle=p.glow;
+      ctx.beginPath(); ctx.arc(t2.x,t2.y,(5+f*6)/2,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha=1;
+    // depth-scaled ball: 0.8 (far) → 1.15 (near)
+    const s=0.8+(Math.sin(this.angle)*0.5+0.5)*0.35, r=15*s;
+    ctx.save(); ctx.translate(pos.x,pos.y);
+    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
+    drawMark(0,0,20*s,'#f5ece0');
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    const near=Math.sin(this.angle)>=0; // near side = lower half of the 45° ellipse
+    // orbit ring (the timing plane) — faint guide behind everything
+    ctx.save(); ctx.strokeStyle=p.ring; ctx.globalAlpha=0.12; ctx.lineWidth=12;
+    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke();
+    // ghosts of past strikes (ellipse-projected)
+    this.ghosts.forEach(g2=>{
+      ctx.globalAlpha=g2.life*0.5;
+      const gp=this.ballPos(g2.a);
+      ctx.strokeStyle=g2.c; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(gp.x,gp.y,13,0,Math.PI*2); ctx.stroke();
+    });
+    ctx.globalAlpha=1;
+    const pos=this.ballPos(this.angle);
+    this.trail.push({x:pos.x,y:pos.y}); if(this.trail.length>12) this.trail.shift();
+    // Depth ordering: far half draws BEHIND the pole, near half in FRONT (passes behind→front).
+    if(!near) this.drawBall();
+    this.drawPole();
+    if(near) this.drawBall();
+    // hit zone + perfect arc — always in front of the pole (floating UI, never occluded)
+    if(this.st==='play'){
+      const pulse=0.75+0.25*Math.sin(tick*0.18);
+      ctx.save(); ctx.lineCap='round';
+      ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=18*pulse;
+      ctx.lineWidth=12; ctx.globalAlpha=0.92;
+      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
+      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
+      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
+      ctx.restore();
+    }
+    drawFX();
+    if(this.banner){
+      const b=this.banner;
+      const a2=Math.min(1,b.life*2);
+      const scale=1+(1-Math.min(1,b.life*1.6))*0.25;
+      ctx.save(); ctx.globalAlpha=a2;
+      ctx.translate(this.CX,this.CY-this.RY-92); ctx.scale(scale,scale);
+      ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
+      ctx.fillStyle='#fff'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=16;
+      ctx.fillText(b.t,0,0);
+      ctx.restore();
+    }
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff';
+    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76);
+    ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
+    ctx.fillText('BEST '+this.best,W/2,96);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
+    if(this.loop>0){ ctx.shadowColor='#ffaa00'; ctx.shadowBlur=6; }
+    ctx.fillText('LOOP ×'+this.mult(),W/2,116);
+    ctx.shadowBlur=0;
+    const rk=rankFor(this.ranks,this.score);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring;
+    ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){
+      ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)';
+      ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26);
+    }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'SWINGBALL',['TAP WHEN THE BALL CROSSES THE ZONE','CLEAN HITS COIL THE ROPE AT THE TOP','FILL THE COIL TO BANK A LOOP','A WILD SWING SNAPS THE ROPE']);
+    if(this.st==='over') drawOverScreen(p,'ROPE SNAPPED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'BANKED '+this.loop+' LOOPS');
+  },
+  tap(){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){
+      if(performance.now()-this.overAt>450){ this.init(); this.start(); }
+      return;
+    }
+    const d=wrap(this.angle-this.zoneC), ad=Math.abs(d);
+    if(ad<=this.zoneHalf) this.clean(d);
+    else if(ad<=this.zoneHalf*this.SLOP) this.mistime();
+    else this.breakRope();
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
+//  GUNGE  (Phase 5.2 — the gunge-tank pipe puzzle)
+//  Verb: tap-to-rotate. The hub's only puzzle — think under a clock,
+//  don't react. Tap a 5×5 pipe tile to rotate it 90°; connect the
+//  top valve to the bottom tank, then hit the drawn RELEASE valve to
+//  let the neon gunge flow. Tap-only (no press()) — stays on tap()
+//  per D12/§3. Joins the daily (D11); endless + 3 lives (D14).
+//
+//  D16 — the board is generated correct-by-construction, never
+//  generate-and-hope. genBoard(): carve ONE simple source→dest path
+//  (randomised DFS), assign each path cell the SHAPE its two
+//  connections require (straight or elbow — always a 2-opening tile,
+//  so a solved path never branches into a decoy and cannot leak),
+//  drop random decoy tiles in the rest, then scramble ONLY rotations.
+//  Every shape's solving orientation is one of its 4 rotations, so a
+//  solution provably exists after any scramble — a shared unsolvable
+//  daily board is structurally impossible. All draws route through
+//  srnd(this): daily is reproducible, free play uses Math.random.
+//
+//  RELEASE valve (D17) — remaining time only banks as score if you
+//  commit early. Outcome matrix:
+//    release,       solved     → score += remaining × segments, advance
+//    release,       mis-solved → leak, lose a life
+//    auto-release@0, solved     → gunge lands, 0 points, NO life lost
+//    auto-release@0, mis-solved → leak, lose a life
+//  ("solved" = gunge reaches the tank cleanly with no spill. Segments
+//  is fixed by the generated path, so the gamble is time-vs-commit,
+//  not "did I misread my pipes" — connected pipes are lit from the
+//  source so the board is always readable. The valve sits well clear
+//  of the grid at the bottom (DAIRY-button style); tapping it can
+//  cost a life, but §8 holds — stray taps elsewhere are free no-ops,
+//  and there is no confirm dialog: the snap decision is the point.)
+// ════════════════════════════════════════════════════════════════
+const GUNGE={
+  id:'gunge', name:'GUNGE', tag:'CONNECT THE PIPES',
+  bestKey:'arc_gunge_best',
+  par:300, // PROVISIONAL — pure guess against remaining×segments; instrument early
+  ranks:[{s:0,t:'STUDIO AUDIENCE'},{s:150,t:'BUCKET CATCHER'},{s:400,t:'PIPE PLUMBER'},{s:800,t:'VALVE MASTER'},{s:1400,t:'GUNGE TANK LEGEND'}], // PROVISIONAL
+  GX:30, GY:150, GRID_PX:300,           // grid box (logical px); cell size derives from N
+  TIME_BASE:48, TIME_STEP:3.6, TIME_FLOOR:21, // per-board countdown (s) — PROVISIONAL (3× the original 16/1.2/7 — owner asked for more solve time)
+  FILL_STEP:0.055,                      // seconds per cell of the release animation
+  PW:0.30,                              // pipe width as a fraction of the cell
+  // Direction bits: N=1 E=2 S=4 W=8. Shapes (base masks): straight 5, elbow 3, tee 7, dead 1.
+  DIRS:[1,2,4,8],
+  init(){
+    this.N=5; this.cell=this.GRID_PX/this.N;
+    this.lives=3; this.score=0; this.stage=0;
+    this.phase='build';           // 'build' (rotating) | 'flow' (gunge propagating)
+    this.result=null; this.fillN=0; this.stopN=0; this.flowT=0;
+    this.shake=0; this.banner=null; this.rejectAt=0;
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.genBoard();
+  },
+  pal(){ return PALS[6]; }, // slime lime
+  start(){ this.st='play'; },
+  // ── geometry helpers ──
+  nbIdx(idx,bit){
+    const N=this.N; let c=idx%N, r=(idx/N)|0;
+    if(bit===1) r--; else if(bit===4) r++; else if(bit===2) c++; else c--;
+    return (c<0||c>=N||r<0||r>=N) ? -1 : r*N+c;
+  },
+  opp(bit){ return bit===1?4:bit===4?1:bit===2?8:2; },
+  rotCW(m){ return ((m<<1)|(m>>3))&15; },
+  rotMask(shape,r){ let m=shape; for(let i=0;i<(r&3);i++) m=this.rotCW(m); return m; },
+  dirBit(from,to){ // bit on 'from' pointing at adjacent 'to'
+    const N=this.N, d=to-from;
+    if(d===-N) return 1; if(d===N) return 4; if(d===1) return 2; return 8;
+  },
+  shapeFor(mask){ return (mask===5||mask===10) ? 5 : 3; }, // 2 collinear bits → straight, else elbow
+  // ── D16 board generation: solved-then-scrambled ──
+  carve(src,dst){ // randomised DFS → one simple path src→dst
+    const N=this.N, seen=new Array(N*N).fill(false), path=[], self=this;
+    function dfs(idx){
+      seen[idx]=true; path.push(idx);
+      if(idx===dst) return true;
+      const ds=self.DIRS.slice();
+      for(let i=ds.length-1;i>0;i--){ const j=Math.floor(srnd(self)*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
+      for(let k=0;k<ds.length;k++){ const n=self.nbIdx(idx,ds[k]); if(n>=0&&!seen[n]&&dfs(n)) return true; }
+      path.pop(); seen[idx]=false; return false;
+    }
+    dfs(src);
+    return path;
+  },
+  genBoard(){
+    const N=this.N=(this.stage>=3?6:5);
+    this.cell=this.GRID_PX/N;
+    const src=Math.floor(srnd(this)*N);              // source on the top edge (valve inlet from N)
+    const dst=(N-1)*N+Math.floor(srnd(this)*N);      // dest on the bottom edge (tank outlet to S)
+    this.srcIdx=src; this.dstIdx=dst;
+    const path=this.carve(src,dst);
+    const mask=new Array(N*N).fill(0);
+    for(let i=0;i<path.length;i++){
+      const idx=path[i]; let m=0;
+      if(i>0) m|=this.dirBit(idx,path[i-1]);
+      if(i<path.length-1) m|=this.dirBit(idx,path[i+1]);
+      if(idx===src) m|=1;   // valve inlet
+      if(idx===dst) m|=4;   // tank outlet
+      mask[idx]=m;
+    }
+    const decoy=[5,3,7,1];
+    this.tiles=new Array(N*N);
+    for(let idx=0;idx<N*N;idx++){
+      const shape = mask[idx] ? this.shapeFor(mask[idx]) : decoy[Math.floor(srnd(this)*decoy.length)];
+      this.tiles[idx]={shape, r:0, path:!!mask[idx]};
+    }
+    for(let idx=0;idx<N*N;idx++) this.tiles[idx].r=Math.floor(srnd(this)*4); // scramble rotations ONLY
+    this.timeLeft=this.stageTime();
+    this.phase='build'; this.result=null; this.fillN=0; this.flowT=0;
+    this.recompute();
+  },
+  stageTime(){ return Math.max(this.TIME_FLOOR, this.TIME_BASE-this.stage*this.TIME_STEP); },
+  // ── connectivity: flood from the source through matching openings ──
+  flow(){
+    const N=this.N, src=this.srcIdx, dst=this.dstIdx;
+    const open=idx=>this.rotMask(this.tiles[idx].shape,this.tiles[idx].r);
+    const lit=new Array(N*N).fill(false), order=[];
+    let leaked=false, leakCell=-1;
+    if(open(src)&1){                                   // gunge only enters if the source accepts the valve
+      const q=[src]; lit[src]=true;
+      while(q.length){
+        const idx=q.shift(); order.push(idx); const om=open(idx);
+        for(let d=0;d<4;d++){ const b=this.DIRS[d]; if(!(om&b)) continue;
+          const n=this.nbIdx(idx,b);
+          if(n<0){ const legit=(idx===src&&b===1)||(idx===dst&&b===4);
+            if(!legit&&leakCell<0){ leaked=true; leakCell=idx; } continue; }
+          if(open(n)&this.opp(b)){ if(!lit[n]){ lit[n]=true; q.push(n); } }
+          else if(leakCell<0){ leaked=true; leakCell=idx; }   // open pipe spilling against a wall
+        }
+      }
+    }
+    const reachedDest = lit[dst] && !!(open(dst)&4);
+    return {lit, order, leaked, leakCell, reachedDest, segments:order.length};
+  },
+  recompute(){ this.flowInfo=this.flow(); }, // cached lighting for the build phase
+  // ── release the valve (manual, or auto at timeLeft 0) ──
+  release(){
+    if(this.phase!=='build') return;
+    const f=this.result=this.flow();
+    this.solved = f.reachedDest && !f.leaked;
+    this.gained = this.solved ? Math.max(0,Math.round(this.timeLeft))*f.segments : 0;
+    this.stopN = f.leaked ? (f.order.indexOf(f.leakCell)+1) : f.order.length;
+    this.phase='flow'; this.flowT=0; this.fillN=0;
+    sTick(0.05);
+  },
+  resolveFlow(){
+    const f=this.result;
+    if(this.solved){
+      this.score+=this.gained;
+      if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+      const d=this.dstIdx, N=this.N, cx=this.GX+(d%N)*this.cell+this.cell/2, cy=this.GY+((d/N)|0)*this.cell+this.cell/2;
+      burst(cx,cy,this.pal().glow,18,4); burst(cx,cy,'#eaffcf',8,2.6);
+      pop(this.gained>0?'+'+this.gained:'GUNGED!',cx,cy-20,this.pal().ring,8);
+      sGold(); buzz(20); this.shake=6;
+      this.stage++; this.banner={t:'GUNGED!',life:1.3}; this.genBoard();
+    } else {
+      const lc=f.leakCell>=0?f.leakCell:this.srcIdx, N=this.N;
+      const cx=this.GX+(lc%N)*this.cell+this.cell/2, cy=this.GY+((lc/N)|0)*this.cell+this.cell/2;
+      burst(cx,cy,'#a6ff44',16,3.8); pop('LEAK!',cx,cy-20,'#ff5a5a',8);
+      sBad(); buzz(50); this.shake=8; this.lives--;
+      if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
+      else this.genBoard(); // fresh board, same stage
+    }
+  },
+  update(dt){
+    this.shake*=0.82;
+    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+    if(this.st!=='play') return;
+    if(this.phase==='build'){
+      this.timeLeft-=dt;
+      if(this.timeLeft<=0){ this.timeLeft=0; this.release(); } // auto-release banks no time
+    } else if(this.phase==='flow'){
+      this.flowT+=dt;
+      this.fillN=Math.min(this.stopN, Math.floor(this.flowT/this.FILL_STEP));
+      if(this.fillN>=this.stopN) this.resolveFlow();
+    }
+  },
+  // ── drawing ──
+  valveRect(){ return {x:W/2-74, y:466, w:148, h:46}; },
+  drawTile(idx){
+    const N=this.N, s=this.cell, col=idx%N, row=(idx/N)|0;
+    const x0=this.GX+col*s, y0=this.GY+row*s, cx=x0+s/2, cy=y0+s/2;
+    const p=this.pal(), t=this.tiles[idx], om=this.rotMask(t.shape,t.r);
+    const filled = this.phase==='flow' && this.result && this.result.order.indexOf(idx)>=0 && this.result.order.indexOf(idx)<this.fillN;
+    const lit = this.phase==='build' && this.flowInfo && this.flowInfo.lit[idx];
+    // tile base
+    rr(x0+2,y0+2,s-4,s-4,7); ctx.fillStyle='#0c1a08'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; rr(x0+2,y0+2,s-4,s-4,7); ctx.stroke();
+    // pipe arms
+    const pw=s*this.PW, col2 = filled?p.glow : lit?p.ring : '#4a5a3a';
+    ctx.save();
+    if(filled){ ctx.shadowColor=p.glow; ctx.shadowBlur=12; } else if(lit){ ctx.shadowColor=p.ring; ctx.shadowBlur=6; }
+    ctx.fillStyle=col2;
+    if(om&1){ rr(cx-pw/2,y0,pw,s/2+2,pw*0.4); ctx.fill(); }
+    if(om&4){ rr(cx-pw/2,cy-2,pw,s/2+2,pw*0.4); ctx.fill(); }
+    if(om&2){ rr(cx-2,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
+    if(om&8){ rr(x0,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
+    ctx.beginPath(); ctx.arc(cx,cy,pw*0.62,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // endpoint markers
+    if(idx===this.srcIdx){ ctx.fillStyle=p.acc; rr(cx-9,y0-6,18,7,2); ctx.fill(); }       // valve cap above source
+    if(idx===this.dstIdx){ ctx.fillStyle=p.acc; rr(cx-11,y0+s-1,22,7,2); ctx.fill(); }     // tank lip below dest
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('STAGE '+(this.stage+1),W/2,128);
+    // countdown bar (the puzzle clock — not a score cap; game is endless, D3)
+    const bx=44, bw=W-88, frac=Math.max(0,Math.min(1,this.timeLeft/this.stageTime()));
+    rr(bx-1,135,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    ctx.fillStyle=frac<0.25?'#ff5a5a':(frac<0.5?'#ffd24a':p.ring);
+    rr(bx,136,Math.max(0,bw*frac),6,2); ctx.fill();
+    // grid
+    for(let idx=0;idx<this.N*this.N;idx++) this.drawTile(idx);
+    drawFX();
+    // RELEASE valve button (drawn, rule 4)
+    const v=this.valveRect(), enabled=this.phase==='build'&&this.st==='play';
+    ctx.save(); ctx.globalAlpha=enabled?1:0.4;
+    rr(v.x,v.y,v.w,v.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(v.x,v.y,v.w,v.h,10); ctx.stroke();
+    const vcx=v.x+26, vcy=v.y+v.h/2; // little valve wheel
+    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(vcx,vcy,9,0,Math.PI*2); ctx.stroke();
+    for(let a=0;a<4;a++){ const an=a*Math.PI/2; ctx.beginPath(); ctx.moveTo(vcx+Math.cos(an)*9,vcy+Math.sin(an)*9); ctx.lineTo(vcx+Math.cos(an)*14,vcy+Math.sin(an)*14); ctx.stroke(); }
+    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('RELEASE',v.x+44,vcy+3);
+    ctx.restore();
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='11px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,148); ctx.restore(); }
+    // rank
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'GUNGE',['TAP A PIPE TO ROTATE IT','CONNECT THE TOP VALVE TO THE TANK','LIT PIPES ARE LINKED TO THE VALVE','HIT RELEASE EARLY TO BANK THE CLOCK']);
+    if(this.st==='over') drawOverScreen(p,'TANK OVERFLOWED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1));
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    if(this.phase!=='build') return;                     // locked while the gunge is flowing
+    if(inR(x,y,this.valveRect())){ this.release(); return; }
+    const N=this.N, s=this.cell;
+    const col=Math.floor((x-this.GX)/s), row=Math.floor((y-this.GY)/s);
+    if(col<0||col>=N||row<0||row>=N){ this.rejectAt=performance.now(); return; } // outside grid = free no-op
+    const idx=row*N+col; this.tiles[idx].r=(this.tiles[idx].r+1)&3;
+    this.recompute(); sTick(0.03); buzz(6);
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
+//  CHATTER  (the 90s NZ playground classic)
 // ════════════════════════════════════════════════════════════════
 const CHATTER={
   id:'chatter', name:'CHATTER', tag:'KEEP THE DISCS ALIVE',
@@ -1224,246 +1724,274 @@ const CHATTER={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 4: SWINGBALL  (endless tetherball — wind the rope up the pole)
-//  Ring-timing core originated with CHAIN (pruned in Phase 5); SWINGBALL
-//  now owns it as the reference implementation, and is a separate game (D1):
-//  a spiral WIND meter is the differentiator; filling it banks a LOOP
-//  (score multiplier +1) and steps difficulty up. Only a miss/break ends it.
+//  GAME: TAZO TYCOON  (Phase 5, Unit 5 — §5.3)
+//  Directional-swipe 2048 over chip-packet tazos. The hub's only pure
+//  spatial-strategy game — NO time pressure by nature (D3-friendly).
+//  Verb = COARSE swipe: press() records the origin, release() picks the
+//  dominant axis past DIR_THRESH → U/D/L/R. drag() is deliberately
+//  absent (D12/§5.3 — a 2048 board wants no live preview), so the router
+//  leaves cur.drag undefined and just streams press→release. tap() is
+//  only ever reached for ready-start / over-restart (router calls it on
+//  release when st!=='play') — gameplay never touches it.
+//
+//  ── ESCALATING SPAWN PRESSURE is a FIRST-CLASS mechanic (§5.3 makes it
+//  a design REQUIREMENT, not polish): an 11-game daily cannot carry a
+//  10-minute 2048 run. Two curves govern run length, both climbing as
+//  you play:
+//    (1) spawn COUNT  = min(SPAWN_CAP, 1 + floor(moves/SPAWN_K)) — tiles
+//        per move grow with MOVES (inevitable, skill-proof), so free
+//        space eventually collapses no matter how well you play.
+//    (2) spawn floor-TIER rises with SCORE (TIER_BANDS) — the board
+//        clots with holo/gold that a single low merge can't clear.
+//  The tier-4 MEGA SLAMMER is the opposing RELIEF valve: forming one
+//  (gold+gold) detonates the low-tier CLUTTER around it (orthogonal
+//  neighbours of tier ≤ SLAM_MAXTIER) and is consumed. Clearing only
+//  clutter makes the valve self-weaken late (fewer low tiles as the
+//  board climbs), so it extends play without becoming an infinite pump —
+//  the failure mode a full-radius detonation caused in sim. Retune the
+//  run length via SPAWN_K / TIER_BANDS (a time cap is forbidden — D3),
+//  NOT by nerfing the merge.
+//
+//  Numbers below are SIM-DERIVED this session (no human play): a headless
+//  replica measured greedy-optimal ≈3.3 min median run (p90 ≈10.8 min),
+//  random ≈2.8 min; a mega slammer forms in a typical run. par set so a
+//  careful daily run lands ~200–290 normalised (only god-runs peg 625) —
+//  the GUNGE-par lesson (§7). Flip CALIBRATE on to log real moves+seconds
+//  per run; ALL PROVISIONAL — retune with the roster (§7).
+//
+//  Loss = board full with NO legal merge in any direction: ONE terminal
+//  state. This is a DELIBERATE divergence from D14's "3-lives" reading —
+//  2048's natural loss is a single board-lock, par-normalisation still
+//  works on the resulting score, and D14 explicitly allows revisit.
+//  Seeded (D16-trivial — a 2048 board is always playable): spawn slots +
+//  tiers via srnd(), so the daily replays identically. Reuses drawBG /
+//  ready+over screens / burst+pop. (Source ordered to GAMES/daily order — 6.0.)
 // ════════════════════════════════════════════════════════════════
-const SWINGBALL={
-  id:'swing', name:'SWINGBALL', tag:'WIND IT UP',
-  spaceTap:true, // positionless — safe to trigger from the spacebar
-  bestKey:'arc_swing_best', // fresh key — never inherits CHAIN's history (D1)
-  par:40, // PROVISIONAL — retune from play data
-  ranks:[{s:0,t:'DRIVEWAY DEBUT'},{s:15,t:'TIP AND RUN'},{s:35,t:'ONE HAND ONE BOUNCE'},{s:60,t:'SIX AND OUT'},{s:100,t:'OVER THE FENCE'},{s:160,t:'AUTO WICKY'},{s:240,t:'JANDAL SLOGGER'},{s:350,t:'BACKYARD TEST LEGEND'}],
-  CX:W/2, CY:300, RX:126, RY:54, COILS:6, // R4: 45° ellipse view
-  POLE_TOP:120, POLE_BOT:470,
-  START_SPEED:1.7, SPEED_INC:0.05, SPEED_CAP:4.2,
-  START_ZONE:0.42, ZONE_SHRINK:0.012, ZONE_FLOOR:0.14,
-  PERFECT_FRAC:0.33, SLOP:1.7,
-  WIND_MAX:100, WIND_HIT:20, WIND_PERFECT:30, WIND_MISS:25,
-  LOOP_SPEED_STEP:0.25, LOOP_ZONE_STEP:0.03,
+const TAZO_COL=[ // tier → disc colours (holo-blue family, PALS[7]); drawn, rule 4
+  {face:'#243357',edge:'#6a8cff',glow:'#6a8cff',pip:'#cdd8ff'}, // 0 plastic
+  {face:'#5a4620',edge:'#e0a84a',glow:'#ffcc66',pip:'#ffe6b0'}, // 1 cardboard
+  {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo
+  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold
+  {face:'#8a8ad0',edge:'#ffffff',glow:'#ffffff',pip:'#ffffff'}, // 4 mega slammer (transient — detonates on formation, never rests)
+];
+const TAZO={
+  id:'tazo', name:'TAZO TYCOON', tag:'SWIPE TO STACK SLAMMERS',
+  bestKey:'arc_tazo_best',
+  par:4500, // PROVISIONAL — sim-derived (greedy median ≈5257); retune with the roster (§5.6/§7)
+  ranks:[{s:0,t:'SWAPSIE ROOKIE'},{s:800,t:'LUNCHTIME TRADER'},{s:2500,t:'HOLO HOARDER'},{s:6000,t:'GOLD SLAMMER'},{s:14000,t:'TAZO TYCOON'}],
+
+  // ── board geometry (360×640 logical, rule 2) ────────────────────
+  N:4, GX:36, GY:198, CELL:66, GAP:6, // 4×66 + 3×6 = 282 wide, centred-ish
+
+  // ── swipe → direction ───────────────────────────────────────────
+  DIR_THRESH:30, // px — below this the gesture is a harmless no-op, no penalty (§8)
+
+  // ── ESCALATING SPAWN PRESSURE (first-class — ALL PROVISIONAL) ────
+  SPAWN_K:6,   // spawn count steps up every SPAWN_K moves
+  SPAWN_CAP:12,// hard ceiling on tiles/move (12 floods a 16-cell board fast)
+  MAX_TIER:4,  // 4 = mega slammer (transient, detonates on formation)
+  SLAM_MAXTIER:1, // detonation clears orthogonal neighbours up to this tier (clutter only)
+  // spawn floor-tier by score: rising score drops tier-0 so the board clots
+  TIER_BANDS:[
+    {s:0,   pool:[0,0,0,0,1]}, // mostly plastic
+    {s:60,  pool:[0,0,1,1,2]}, // cardboard creeps in
+    {s:180, pool:[0,1,1,2,2]}, // holo pressure
+    {s:360, pool:[1,1,2,2,3]}, // gold clutter, no more plastic
+  ],
+  MERGE_PTS:[0,3,8,20,0], // points for MERGING INTO tier t (t=4 scored via the slam)
+  SLAM_PTS:6,             // per cell a mega slammer clears (incl. itself)
+  SLIDE_T:0.09, BUMP_T:0.16, // animation seconds
+
+  CALIBRATE:false, // logs moves + seconds + score per run to console on game over (§7)
+
+  cellXY(i){ const r=Math.floor(i/this.N), c=i%this.N;
+    return {x:this.GX+c*(this.CELL+this.GAP), y:this.GY+r*(this.CELL+this.GAP)}; },
+  spawnCount(){ return Math.min(this.SPAWN_CAP, 1+Math.floor(this.moves/this.SPAWN_K)); },
+  tierPool(){ let b=this.TIER_BANDS[0]; this.TIER_BANDS.forEach(x=>{ if(this.score>=x.s) b=x; }); return b.pool; },
+
   init(){
-    this.baseSpeed=this.START_SPEED; this.baseZone=this.START_ZONE;
-    this.angle=-Math.PI/2; this.dir=1; this.speed=this.baseSpeed;
-    this.zoneC=wrap(this.angle+2.2); this.zoneHalf=this.baseZone;
-    this.wasInside=false;
-    this.wind=0; this.loop=0;
-    this.score=0; this.hits=0;
-    this.timeScale=1; this.shake=0; this.grace=0; this.flash=0; this.wobble=0;
-    this.best=loadBest(this.bestKey); // no legacy arg — no CHAIN inheritance
-    this.newBest=false; this.trail=[]; this.ghosts=[]; this.banner=null;
+    this.best=loadBest(this.bestKey); this.newBest=false;
+    this.score=0; this.moves=0; this.slams=0; this.topTier=0;
+    this.cells=new Array(this.N*this.N).fill(-1);        // logical board: tier or -1
+    this.bump=new Array(this.N*this.N).fill(0);          // per-cell merge/spawn scale bounce
+    this.slideFrom=new Array(this.N*this.N).fill(null);  // {dx,dy} px a tile slid from
+    this.slideT=0; this.shake=0; this.rejectFlash=0;
+    this.aim=null; this.startAt=performance.now();
     this.st='ready'; this.overAt=0;
     parts=[]; pops=[];
+    this.spawnTiles(2);            // opening board
+    this.slideFrom.fill(null);     // no slide on the very first tiles
+    this.bump.fill(0);
   },
-  pal(){ return PALS[3]; }, // backyard green (gold accents added inline)
-  mult(){ return 1+this.loop; },
-  start(){ this.st='play'; },
-  ballPos(a){ return {x:this.CX+Math.cos(a)*this.RX, y:this.CY+Math.sin(a)*this.RY}; }, // R4 ellipse
-  poleSway(){ return Math.sin(tick*0.45)*6*this.wobble; }, // cap+coil sway on a hit (shaft stays planted)
-  placeZone(){
-    this.zoneC=wrap(this.angle+this.dir*(1.35+srnd(this)*3.0));
-    this.wasInside=false;
+  start(){ this.st='play'; this.startAt=performance.now(); },
+  gameOver(){
+    this.st='over'; this.overAt=performance.now();
+    if(this.CALIBRATE){ const secs=((performance.now()-this.startAt)/1000).toFixed(1);
+      console.log('TAZO run: moves='+this.moves+' secs='+secs+' score='+this.score+' slams='+this.slams+' top='+this.topTier); }
+    sBad(); buzz(70); if(this.onOver) this.onOver();
   },
-  bankLoop(){
-    this.loop++; this.wind=0; this.flash=1;
-    this.baseSpeed=Math.min(this.SPEED_CAP,this.baseSpeed+this.LOOP_SPEED_STEP);
-    this.baseZone=Math.max(this.ZONE_FLOOR,this.baseZone-this.LOOP_ZONE_STEP);
-    this.speed=this.baseSpeed; this.zoneHalf=this.baseZone;
-    this.timeScale=0.35; this.grace=0.3; // grace through the slow-mo
-    this.banner={t:'LOOP ×'+this.mult()+'!',life:1.5};
-    burst(this.CX,this.CY,'#ffd24a',24,5); burst(this.CX,this.CY,'#fff',8,3);
-    sStage(); buzz(30); this.shake=6;
+
+  // ── pointer stream (D12): press + release, drag ignored (§5.3) ───
+  press(x,y){ this.aim={x0:x,y0:y}; },
+  release(x,y){
+    const a=this.aim; this.aim=null;
+    if(!a || this.st!=='play') return; // pointercancel with no drag lands here → no-op below
+    const dx=x-a.x0, dy=y-a.y0;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<this.DIR_THRESH){ this.rejectFlash=1; sTick(0.02); return; } // §8 free no-op
+    const dir=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');
+    this.move(dir);
   },
-  clean(d){
-    const perfect=Math.abs(d)<=this.zoneHalf*this.PERFECT_FRAC;
-    const gain=(perfect?2:1)*this.mult();
-    this.score+=gain;
-    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); }
-    this.hits++;
-    const pos=this.ballPos(this.angle);
-    this.ghosts.push({a:this.zoneC,life:1,c:perfect?'#ffffff':this.pal().glow});
-    if(perfect){ burst(pos.x,pos.y,'#ffffff',12,3.6); pop('PERFECT +'+gain,pos.x,pos.y-26,'#ffffff',7); sPerfect(); buzz(18); }
-    else { burst(pos.x,pos.y,this.pal().glow,9,2.8); pop('+'+gain,pos.x,pos.y-24,this.pal().ring,7); sHit(); buzz(12); }
-    this.speed=Math.min(this.SPEED_CAP,this.speed+this.SPEED_INC);
-    this.zoneHalf=Math.max(this.ZONE_FLOOR,this.zoneHalf-this.ZONE_SHRINK);
-    this.wind+=perfect?this.WIND_PERFECT:this.WIND_HIT;
-    if(this.wind>=this.WIND_MAX) this.bankLoop();
-    this.dir*=-1; this.wobble=1; // R4: wobble the cap+coil on every hit
-    this.placeZone();
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // during play the router routes to press/release — never here (D12)
   },
-  mistime(){
-    const pos=this.ballPos(this.angle);
-    this.wind=Math.max(0,this.wind-this.WIND_MISS); // rope unwinds, but you survive
-    burst(pos.x,pos.y,'#ff9a3a',7,2.4);
-    pop('UNWIND',pos.x,pos.y-22,'#ff9a3a',6);
-    beep(300,0.12,'sawtooth',0.04,180); buzz(10);
-    this.shake=Math.max(this.shake,3);
-    this.dir*=-1; this.wobble=1;
-    this.placeZone();
-  },
-  breakRope(){
-    if(this.grace>0) return; // loop-bank grace period: no breaks
-    const pos=this.ballPos(this.angle);
-    burst(pos.x,pos.y,'#ff4455',22,5); burst(pos.x,pos.y,'#fff',8,3);
-    this.shake=10; sBad(); buzz(70);
-    this.overAt=performance.now(); this.st='over';
-    if(this.onOver) this.onOver();
-  },
-  update(dt){
-    this.timeScale+=(1-this.timeScale)*0.055;
-    this.shake*=0.82;
-    if(this.flash>0) this.flash-=0.04;
-    if(this.grace>0) this.grace-=dt;
-    if(this.wobble>0) this.wobble=Math.max(0,this.wobble-dt*1.8);
-    if(this.st==='play'){
-      // overshoot/miss detection: the wasInside/sign-crossing core (CHAIN was
-      // the original; this is now the reference implementation) — edit with care.
-      const prevD=wrap(this.angle-this.zoneC);
-      this.angle=wrap(this.angle+this.dir*this.speed*dt*this.timeScale);
-      const d=wrap(this.angle-this.zoneC);
-      const inside=Math.abs(d)<=this.zoneHalf;
-      if(inside){ this.wasInside=true; }
-      else if(this.wasInside){
-        if(Math.sign(d)===Math.sign(this.dir)) this.breakRope();
-        this.wasInside=false;
-      } else {
-        if(Math.sign(prevD)!==Math.sign(d)&&Math.abs(prevD)>this.zoneHalf&&Math.abs(d)>this.zoneHalf&&Math.abs(prevD-d)<Math.PI) this.breakRope();
+
+  // cell indices of each line in dest→far order for a given direction
+  lines(dir){
+    const N=this.N, out=[];
+    for(let k=0;k<N;k++){ const ln=[];
+      for(let j=0;j<N;j++){
+        if(dir==='L') ln.push(k*N+j);
+        else if(dir==='R') ln.push(k*N+(N-1-j));
+        else if(dir==='U') ln.push(j*N+k);
+        else ln.push((N-1-j)*N+k); // 'D'
       }
-    } else if(this.st==='ready'){
-      this.angle=wrap(this.angle+this.dir*0.9*dt);
+      out.push(ln);
     }
-    this.ghosts.forEach(g2=>g2.life-=0.03); this.ghosts=this.ghosts.filter(g2=>g2.life>0);
-    if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
+    return out;
   },
-  drawPole(){
-    const p=this.pal();
-    // planted shaft (never sways)
-    rr(this.CX-6,this.POLE_TOP,12,this.POLE_BOT-this.POLE_TOP+8,5); ctx.fillStyle='#3a2a16'; ctx.fill();
-    rr(this.CX-6,this.POLE_TOP,4,this.POLE_BOT-this.POLE_TOP+8,3); ctx.fillStyle='#5a4324'; ctx.fill();
-    // cap + rope coil sway together on a hit (R4)
-    const sx=this.CX+this.poleSway();
-    rr(sx-9,this.POLE_TOP-6,18,8,3); ctx.fillStyle=p.acc; ctx.fill();
-    // wind meter = a coil of rope rings stacked under the cap; round(wind/MAX*COILS) lit
-    const lit=Math.round(this.wind/this.WIND_MAX*this.COILS);
-    const gold=this.wind>=this.WIND_MAX*0.75;
-    for(let i=0;i<this.COILS;i++){
-      const y=this.POLE_TOP+8+i*7, on=i<lit, col=on?(gold?'#ffd24a':p.glow):'rgba(255,255,255,0.14)';
-      ctx.save(); if(on){ ctx.shadowColor=col; ctx.shadowBlur=6+8*this.flash; }
-      ctx.strokeStyle=col; ctx.lineWidth=2.5;
-      ctx.beginPath(); ctx.ellipse(sx,y,8,3,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
+  move(dir){
+    const N=this.N, next=new Array(N*N).fill(-1), from=new Array(N*N).fill(null), merges=[];
+    let moved=false;
+    for(const ln of this.lines(dir)){
+      const seq=[]; for(const idx of ln){ if(this.cells[idx]>=0) seq.push({t:this.cells[idx],src:idx}); }
+      const out=[];
+      for(let i=0;i<seq.length;i++){
+        if(i+1<seq.length && seq[i].t===seq[i+1].t && seq[i].t<this.MAX_TIER){
+          out.push({t:seq[i].t+1, src:seq[i].src, merged:true}); i++; // consume the pair (once per tile per move)
+        } else out.push({t:seq[i].t, src:seq[i].src, merged:false});
+      }
+      for(let pos=0;pos<out.length;pos++){
+        const destIdx=ln[pos], tile=out[pos];
+        next[destIdx]=tile.t;
+        if(tile.src!==destIdx || tile.merged){ const sc=this.cellXY(tile.src), dc=this.cellXY(destIdx); from[destIdx]={dx:sc.x-dc.x,dy:sc.y-dc.y}; }
+        if(tile.src!==destIdx) moved=true;
+        if(tile.merged){ moved=true; merges.push({idx:destIdx,tier:tile.t}); }
+      }
+    }
+    if(!moved){ this.rejectFlash=1; sTick(0.02); return; } // no change = free no-op (§8)
+    this.cells=next; this.slideFrom=from; this.slideT=1; this.moves++;
+    for(const m of merges){
+      this.bump[m.idx]=1; this.topTier=Math.max(this.topTier,m.tier);
+      const q=this.cellXY(m.idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
+      if(m.tier>=this.MAX_TIER){ this.detonate(m.idx); }
+      else {
+        this.score+=this.MERGE_PTS[m.tier];
+        pop('+'+this.MERGE_PTS[m.tier],cx,cy-6,TAZO_COL[m.tier].glow,7);
+        burst(cx,cy,TAZO_COL[m.tier].glow,7,2.6);
+      }
+    }
+    sHit(); this.clack(); buzz(8);
+    this.spawnTiles(this.spawnCount());  // ESCALATING SPAWN PRESSURE — after every effective move
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+    if(!this.hasMove()) this.gameOver();
+  },
+  detonate(idx){
+    this.slams++;
+    const N=this.N, r=Math.floor(idx/N), c=idx%N;
+    const q=this.cellXY(idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
+    let cleared=0;
+    for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){ // orthogonal clutter only
+      const rr2=r+dr, cc=c+dc; if(rr2<0||rr2>=N||cc<0||cc>=N) continue;
+      const j=rr2*N+cc;
+      if(this.cells[j]>=0 && this.cells[j]<=this.SLAM_MAXTIER){ this.cells[j]=-1; cleared++;
+        const w=this.cellXY(j); burst(w.x+this.CELL/2,w.y+this.CELL/2,'#a6c8ff',6,2.4); }
+    }
+    this.cells[idx]=-1; // the slammer is consumed (transient tier-4)
+    const pts=this.SLAM_PTS*(cleared+1); this.score+=pts;
+    pop('SLAM! +'+pts,cx,cy-8,'#ffffff',9);
+    burst(cx,cy,'#ffffff',18,3.6); this.shake=1; sGold(); buzz(30);
+  },
+  spawnTiles(n){
+    const empties=[]; for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) empties.push(i);
+    const pool=this.tierPool(); n=Math.min(n,empties.length);
+    for(let k=0;k<n;k++){
+      const idx=empties.splice(Math.floor(srnd(this)*empties.length),1)[0];
+      this.cells[idx]=pool[Math.floor(srnd(this)*pool.length)];
+      this.bump[idx]=0.7; // gentle spawn pop
     }
   },
-  drawBall(){
-    const p=this.pal(), pos=this.ballPos(this.angle), sx=this.CX+this.poleSway();
-    // rope: pole-top (swaying cap) → ball, every frame
-    ctx.strokeStyle='rgba(240,230,200,0.5)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(sx,this.POLE_TOP-2); ctx.lineTo(pos.x,pos.y); ctx.stroke();
-    // trail (faint, behind the ball)
-    this.trail.forEach((t2,i)=>{
-      const f=i/this.trail.length;
-      ctx.globalAlpha=f*0.30; ctx.fillStyle=p.glow;
-      ctx.beginPath(); ctx.arc(t2.x,t2.y,(5+f*6)/2,0,Math.PI*2); ctx.fill();
-    });
-    ctx.globalAlpha=1;
-    // depth-scaled ball: 0.8 (far) → 1.15 (near)
-    const s=0.8+(Math.sin(this.angle)*0.5+0.5)*0.35, r=15*s;
-    ctx.save(); ctx.translate(pos.x,pos.y);
-    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fillStyle='#e85d15'; ctx.fill();
-    ctx.shadowBlur=0;
-    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.stroke();
-    drawMark(0,0,20*s,'#f5ece0');
+  hasMove(){
+    const N=this.N;
+    for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) return true;
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++){ const t=this.cells[r*N+c];
+      if(c+1<N && this.cells[r*N+c+1]===t && t<this.MAX_TIER) return true;
+      if(r+1<N && this.cells[(r+1)*N+c]===t && t<this.MAX_TIER) return true;
+    }
+    return false;
+  },
+  clack(){ beep(180,0.03,'square',0.05); beep(120,0.045,'triangle',0.04); }, // plastic tazo clack
+
+  update(dt){
+    if(this.rejectFlash>0) this.rejectFlash-=dt*3;
+    if(this.shake>0) this.shake-=dt*3;
+    if(this.slideT>0) this.slideT=Math.max(0,this.slideT-dt/this.SLIDE_T);
+    for(let i=0;i<this.bump.length;i++) if(this.bump[i]>0) this.bump[i]=Math.max(0,this.bump[i]-dt/this.BUMP_T);
+  },
+
+  drawTazo(cx,cy,tier,s){
+    const col=TAZO_COL[tier], R=this.CELL*0.44*s;
+    ctx.save(); ctx.translate(cx,cy);
+    const g=ctx.createRadialGradient(-R*0.3,-R*0.35,R*0.2,0,0,R);
+    g.addColorStop(0,col.edge); g.addColorStop(0.5,col.face); g.addColorStop(1,'#0a0f1e');
+    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle=col.edge; ctx.lineWidth=2.5; ctx.shadowColor=col.glow; ctx.shadowBlur=tier>=2?9:3;
+    ctx.beginPath(); ctx.arc(0,0,R-1.5,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(0,0,R*0.6,0,Math.PI*2); ctx.stroke();
+    drawMark(0,0,R*0.86,col.pip); // brand mark centre — hub cohesion (drawn, rule 4)
     ctx.restore();
   },
   render(){
-    const p=this.pal();
-    ctx.save();
-    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
-    drawBG(p);
-    const near=Math.sin(this.angle)>=0; // near side = lower half of the 45° ellipse
-    // orbit ring (the timing plane) — faint guide behind everything
-    ctx.save(); ctx.strokeStyle=p.ring; ctx.globalAlpha=0.12; ctx.lineWidth=12;
-    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke(); ctx.restore();
-    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,0,Math.PI*2); ctx.stroke();
-    // ghosts of past strikes (ellipse-projected)
-    this.ghosts.forEach(g2=>{
-      ctx.globalAlpha=g2.life*0.5;
-      const gp=this.ballPos(g2.a);
-      ctx.strokeStyle=g2.c; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(gp.x,gp.y,13,0,Math.PI*2); ctx.stroke();
-    });
-    ctx.globalAlpha=1;
-    const pos=this.ballPos(this.angle);
-    this.trail.push({x:pos.x,y:pos.y}); if(this.trail.length>12) this.trail.shift();
-    // Depth ordering: far half draws BEHIND the pole, near half in FRONT (passes behind→front).
-    if(!near) this.drawBall();
-    this.drawPole();
-    if(near) this.drawBall();
-    // hit zone + perfect arc — always in front of the pole (floating UI, never occluded)
-    if(this.st==='play'){
-      const pulse=0.75+0.25*Math.sin(tick*0.18);
-      ctx.save(); ctx.lineCap='round';
-      ctx.strokeStyle=p.glow; ctx.shadowColor=p.glow; ctx.shadowBlur=18*pulse;
-      ctx.lineWidth=12; ctx.globalAlpha=0.92;
-      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf,this.zoneC+this.zoneHalf); ctx.stroke();
-      ctx.lineWidth=5; ctx.globalAlpha=1; ctx.strokeStyle='#fff'; ctx.shadowBlur=8;
-      ctx.beginPath(); ctx.ellipse(this.CX,this.CY,this.RX,this.RY,0,this.zoneC-this.zoneHalf*this.PERFECT_FRAC,this.zoneC+this.zoneHalf*this.PERFECT_FRAC); ctx.stroke();
-      ctx.restore();
+    const p=PALS[7], N=this.N;
+    let ox=0,oy=0;
+    if(this.shake>0){ ox=(Math.random()-0.5)*7*this.shake; oy=(Math.random()-0.5)*7*this.shake; }
+    ctx.save(); ctx.translate(ox,oy);
+    drawBG(p,H-30);
+    const span=N*this.CELL+(N-1)*this.GAP, pad=8;
+    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14);
+    ctx.fillStyle='rgba(6,10,26,0.72)'; ctx.fill();
+    ctx.globalAlpha=this.rejectFlash>0?0.85:0.5; ctx.strokeStyle=this.rejectFlash>0?'#ff6a8a':p.ring; ctx.lineWidth=2;
+    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14); ctx.stroke(); ctx.globalAlpha=1;
+    for(let i=0;i<N*N;i++){ const q=this.cellXY(i);
+      rr(q.x,q.y,this.CELL,this.CELL,10); ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fill(); }
+    for(let i=0;i<N*N;i++){ if(this.cells[i]<0) continue;
+      const q=this.cellXY(i); let dx=0,dy=0;
+      if(this.slideT>0 && this.slideFrom[i]){ const e=this.slideT*this.slideT; dx=this.slideFrom[i].dx*e; dy=this.slideFrom[i].dy*e; }
+      const b=this.bump[i], scl=1+(b>0?Math.sin((1-b)*Math.PI*2)*0.16*b:0); // double-strike bounce
+      this.drawTazo(q.x+this.CELL/2+dx,q.y+this.CELL/2+dy,this.cells[i],scl);
     }
     drawFX();
-    if(this.banner){
-      const b=this.banner;
-      const a2=Math.min(1,b.life*2);
-      const scale=1+(1-Math.min(1,b.life*1.6))*0.25;
-      ctx.save(); ctx.globalAlpha=a2;
-      ctx.translate(this.CX,this.CY-this.RY-92); ctx.scale(scale,scale);
-      ctx.font='11px "Press Start 2P"'; ctx.textAlign='center';
-      ctx.fillStyle='#fff'; ctx.shadowColor='#ffd24a'; ctx.shadowBlur=16;
-      ctx.fillText(b.t,0,0);
-      ctx.restore();
-    }
-    // HUD
-    ctx.textAlign='center';
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff';
-    ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.fillText(this.score,W/2,76);
-    ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-    ctx.fillText('BEST '+this.best,W/2,96);
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
-    if(this.loop>0){ ctx.shadowColor='#ffaa00'; ctx.shadowBlur=6; }
-    ctx.fillText('LOOP ×'+this.mult(),W/2,116);
-    ctx.shadowBlur=0;
-    const rk=rankFor(this.ranks,this.score);
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring;
-    ctx.fillText(rk.t,W/2,H-42);
-    const nx=nextRank(this.ranks,this.score);
-    if(nx){
-      ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)';
-      ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26);
-    }
     ctx.restore();
-    if(this.st==='ready') drawReadyScreen(p,'SWINGBALL',['TAP WHEN THE BALL CROSSES THE ZONE','CLEAN HITS COIL THE ROPE AT THE TOP','FILL THE COIL TO BANK A LOOP','A WILD SWING SNAPS THE ROPE']);
-    if(this.st==='over') drawOverScreen(p,'ROPE SNAPPED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'BANKED '+this.loop+' LOOPS');
-  },
-  tap(){
-    if(this.st==='ready'){ this.start(); return; }
-    if(this.st==='over'){
-      if(performance.now()-this.overAt>450){ this.init(); this.start(); }
-      return;
-    }
-    const d=wrap(this.angle-this.zoneC), ad=Math.abs(d);
-    if(ad<=this.zoneHalf) this.clean(d);
-    else if(ad<=this.zoneHalf*this.SLOP) this.mistime();
-    else this.breakRope();
+    // HUD (unshaken)
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,80); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,100);
+    const spc=this.st==='play'?this.spawnCount():1; // surface the escalation to the player
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle=spc>=4?'#ff6a8a':spc>=2?'#ffd24a':'rgba(255,255,255,0.4)';
+    ctx.fillText('SPAWN ×'+spc,W/2,118);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rankFor(this.ranks,this.score).t,W/2,H-14);
+    if(this.CALIBRATE){ ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#8aff8a'; ctx.textAlign='left';
+      ctx.fillText('mv='+this.moves+' spc='+spc+' sl='+this.slams,8,H-30); }
+    if(this.st==='ready') drawReadyScreen(p,'TAZO TYCOON',['SWIPE TO SLIDE THE TAZOS','MATCH TWO TO TRADE UP A TIER','GOLD+GOLD = MEGA SLAMMER','BOARD FILLS FASTER AS YOU CLIMB']);
+    if(this.st==='over') drawOverScreen(p,'BOARD LOCKED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'MOVES '+this.moves+' · '+this.slams+' SLAMS');
   }
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 5: SCRAMBLE  (the lolly scramble, inverted — you throw)
+//  SCRAMBLE  (the lolly scramble, inverted — you throw)
 //  Score rewards EVENNESS, not volume: rate × (1 − stddev/maxStddev),
 //  with a FAIR SHARE ×2 when everyone is fed and level (CHATTER analogue).
 //  Kids' meters decay (greedy kids faster); an empty meter costs a life.
@@ -1723,7 +2251,239 @@ const SCRAMBLE={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 6: KNUCKLEBONES  (digitised jacks — catch the toss)
+//  GAME: DAIRY WARMER  (Phase 5, Unit 6 — §5.4)
+//  Spatial-packing on the corner-dairy pie warmer. The hub's only CALM
+//  game — no clock, no falling piece, no reaction test (D3-friendly).
+//  Verb = TAP-only (D13, settled): tap a pastry in the tray to SELECT it
+//  (held preview + rotation), tap the drawn ROTATE button to cycle its
+//  orientation, tap a shelf cell to PLACE it. NO drag, NO press() — so
+//  per D12/§3 the router leaves it on tap()-on-pointerdown, exactly like
+//  GUNGE. Blockdoku-style: place trominoes/tetromino anywhere on the 6×4
+//  shelf, a FULL HORIZONTAL ROW sells (clears) with a neon FRESH! flash,
+//  no gravity. Multi-row clears score exponentially (double-decker order).
+//
+//  Tray of 3, place in ANY ORDER (reading B, owner-approved 2026-07-18):
+//  §5.4's "tap a queued pastry to select" reads as free choice, which
+//  suits the calm ethos better than a forced FIFO head; the loss check is
+//  generalised from "the head can't fit" to "no tray piece fits anywhere".
+//  STRIKE = the whole tray is dead (D14, 3-lives): heat escapes, a life is
+//  lost, the shelf is WIPED (fresh warmer) and a new tray dealt — the wipe
+//  guarantees the fresh tray is placeable, so a strike can never chain in
+//  one frame. 3 strikes = over.
+//
+//  §8 holds throughout: tapping an invalid cell, an empty cell, or the
+//  rotate button with nothing held is a FREE no-op with a soft reject
+//  flash — never a strike. A strike is a board-state consequence, not a
+//  tap penalty. Seeded (D16-trivial): tray order via srnd(); placement /
+//  clear math stays live so free play is byte-identical. Reuses drawBG /
+//  ready+over screens / burst+pop / ranks (rule 9). par & all constants
+//  PROVISIONAL — retune with the roster (§5.6/§7). (Source ordered to
+//  GAMES/daily order — Unit 6.0.)
+// ════════════════════════════════════════════════════════════════
+const DAIRY={
+  id:'dairy', name:'DAIRY WARMER', tag:'PACK THE PIE WARMER',
+  bestKey:'arc_dairy_best',
+  // par PROVISIONAL & SIM-INFORMED (no human play). A headless greedy replica over 200
+  // seeds scored median ≈4620 (p10 ≈2580, p90 ≈7980), median ≈147 placements/run — so the
+  // spec's par:250 would peg the 625 normaliser cap for ANY competent player (the GUNGE/TAZO
+  // par lesson). Set ~2200 so a strong run lands mid-band, not pegged. CAVEAT the other way:
+  // DAIRY has NO clock and a forgiving wipe-on-strike, so the greedy bot OVER-states a human
+  // (free row-clears + full resets) — real play may sit well below 4620, i.e. par may need to
+  // come DOWN after data, unlike the usual "too low" story. Retune with the roster (§7).
+  par:2200, // PROVISIONAL
+  ranks:[{s:0,t:'AFTER-SCHOOL REGULAR'},{s:400,t:'COUNTER HAND'},{s:1000,t:'WARMER WRANGLER'},{s:2000,t:'PIE ARCHITECT'},{s:3500,t:'DAIRY OWNER'}], // PROVISIONAL
+  COLS:6, ROWS:4, CELL:50, GX:30, GY:140,   // 6×4 glass shelf, 300×200 box
+  BASE_CLEAR:60,                             // per-row clear base — score += BASE×(2^rows − 1) (PROVISIONAL)
+  // Pastries as origin-relative [col,row] cells; orientations derived + deduped in init().
+  SHAPES:[
+    {name:'MINCE & CHEESE', col:'#e0a84a', cells:[[0,0],[1,0],[0,1],[1,1]]}, // 2×2 — 1 orientation
+    {name:'SAUSAGE ROLL',   col:'#d69a52', cells:[[0,0],[1,0],[2,0]]},       // 1×3 — 2 orientations
+    {name:'POTATO-TOP',     col:'#c07838', cells:[[0,0],[0,1],[1,1]]},       // L-tromino — 4 orientations
+  ],
+  pal(){ return PALS[8]; }, // warm caramel (hues PROVISIONAL, §3/§7)
+  // ── orientation maths (built once per init) ──
+  buildOris(){
+    const norm=cs=>{ const mc=Math.min(...cs.map(p=>p[0])), mr=Math.min(...cs.map(p=>p[1])); return cs.map(([c,r])=>[c-mc,r-mr]); };
+    const key=cs=>cs.map(p=>p[0]+','+p[1]).sort().join(';');
+    const rot=cs=>cs.map(([c,r])=>[-r,c]); // 90° CW about origin
+    this.ORIS=this.SHAPES.map(s=>{
+      const out=[], seen={}; let cur=s.cells;
+      for(let i=0;i<4;i++){ const n=norm(cur), k=key(n); if(!seen[k]){ seen[k]=1; out.push(n); } cur=rot(cur); }
+      return out;
+    });
+  },
+  init(){
+    this.buildOris();
+    this.grid=new Array(this.COLS*this.ROWS).fill(null); // null = empty, else pastry colour
+    this.tray=[]; this.sel=-1; this.rot=0;
+    this.lives=3; this.score=0; this.served=0; this.rowsCleared=0;
+    this.shake=0; this.banner=null; this.rejectAt=0; this.reject=null; // reject={cells,col,row}
+    this.best=loadBest(this.bestKey); this.newBest=false;
+    this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+    this.dealTray();
+  },
+  start(){ this.st='play'; },
+  // ── tray / pieces ──
+  dealTray(){ while(this.tray.length<3) this.tray.push(Math.floor(srnd(this)*this.SHAPES.length)); },
+  orisFor(shapeIdx){ return this.ORIS[shapeIdx]; },
+  fits(cells,col,row){
+    for(const [dc,dr] of cells){ const c=col+dc, r=row+dr;
+      if(c<0||c>=this.COLS||r<0||r>=this.ROWS) return false;
+      if(this.grid[r*this.COLS+c]!==null) return false; }
+    return true;
+  },
+  canPlaceAny(shapeIdx){
+    const oris=this.orisFor(shapeIdx);
+    for(const o of oris) for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++) if(this.fits(o,c,r)) return true;
+    return false;
+  },
+  trayDead(){ return this.tray.every(s=>!this.canPlaceAny(s)); },
+  // ── placement + clears ──
+  place(col,row){
+    const shapeIdx=this.tray[this.sel], ori=this.orisFor(shapeIdx)[this.rot%this.orisFor(shapeIdx).length];
+    if(!this.fits(ori,col,row)){ // soft reject — free no-op (§8), red ghost so the misfit is legible
+      this.reject={cells:ori,col,row}; this.rejectAt=performance.now(); sBad(); return;
+    }
+    const s=this.SHAPES[shapeIdx];
+    for(const [dc,dr] of ori){ const c=col+dc, r=row+dr; this.grid[r*this.COLS+c]=s.col;
+      const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2; burst(cx,cy,s.col,4,1.8); }
+    this.served++; sHit(); buzz(8);
+    this.tray.splice(this.sel,1); this.sel=-1; this.rot=0; this.reject=null;
+    this.dealTray();
+    this.resolveClears();
+    if(this.st==='play' && this.trayDead()) this.strike();
+  },
+  resolveClears(){
+    const full=[];
+    for(let r=0;r<this.ROWS;r++){ let f=true; for(let c=0;c<this.COLS;c++) if(this.grid[r*this.COLS+c]===null){ f=false; break; } if(f) full.push(r); }
+    const n=full.length; if(!n) return;
+    const p=this.pal();
+    for(const r of full){ for(let c=0;c<this.COLS;c++){ const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2;
+      burst(cx,cy,p.glow,6,3); this.grid[r*this.COLS+c]=null; } }
+    this.rowsCleared+=n;
+    const gained=this.BASE_CLEAR*(Math.pow(2,n)-1); // exponential — double-decker order
+    this.score+=gained;
+    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
+    const my=this.GY+full[0]*this.CELL+this.CELL/2;
+    pop((n>1?n+' ROWS! ':'')+'+'+gained,W/2,my-4,p.ring,9);
+    this.banner={t:n>1?'FRESH ×'+n+'!':'FRESH!',life:1.3};
+    if(n>1){ sGold(); this.shake=6; } else sPerfect();
+    buzz(n>1?24:12);
+  },
+  strike(){
+    this.lives--; this.shake=8; sBad(); buzz(50);
+    this.banner={t:'HEAT ESCAPED!',life:1.4};
+    pop('-1',W/2,this.GY+100,'#ff5a5a',10);
+    if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); return; }
+    this.grid.fill(null);          // heat escaped → empty the warmer, fresh shelf (guarantees a placeable tray)
+    this.tray=[]; this.sel=-1; this.rot=0; this.reject=null; this.dealTray();
+  },
+  update(dt){
+    this.shake*=0.82;
+    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+  },
+  // ── layout ──
+  rotRect(){ return {x:W-104, y:462, w:92, h:44}; },
+  traySlotRect(i){ const bw=98, gap=6, x0=W/2-(bw*3+gap*2)/2; return {x:x0+i*(bw+gap), y:372, w:bw, h:70}; },
+  // draw an orientation's cells centred in a box (tray/ghost previews)
+  drawPiece(cx,cy,cells,cell,col,alpha){
+    let mc=1e9,mr=1e9,xc=-1e9,xr=-1e9;
+    for(const [c,r] of cells){ mc=Math.min(mc,c); mr=Math.min(mr,r); xc=Math.max(xc,c); xr=Math.max(xr,r); }
+    const w=(xc-mc+1)*cell, h=(xr-mr+1)*cell, ox=cx-w/2-mc*cell, oy=cy-h/2-mr*cell;
+    ctx.save(); ctx.globalAlpha=alpha==null?1:alpha;
+    for(const [c,r] of cells){ const x=ox+c*cell, y=oy+r*cell; rr(x+1,y+1,cell-2,cell-2,4); ctx.fillStyle=col; ctx.fill(); }
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    // shelf
+    const CELL=this.CELL;
+    for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++){
+      const x0=this.GX+c*CELL, y0=this.GY+r*CELL, v=this.grid[r*this.COLS+c];
+      rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.fillStyle=v?v:'#1a1206'; ctx.fill();
+      ctx.strokeStyle=v?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'; ctx.lineWidth=1; rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.stroke();
+      if(v){ ctx.fillStyle='rgba(255,255,255,0.14)'; rr(x0+6,y0+6,CELL-12,6,3); ctx.fill(); } // glass sheen
+    }
+    // glass shelf edges
+    ctx.strokeStyle=p.acc+'88'; ctx.lineWidth=2;
+    for(let r=0;r<=this.ROWS;r++){ const y=this.GY+r*CELL; ctx.beginPath(); ctx.moveTo(this.GX-4,y); ctx.lineTo(this.GX+this.COLS*CELL+4,y); ctx.stroke(); }
+    // reject ghost (soft misfit, §8)
+    if(this.reject&&performance.now()-this.rejectAt<220){
+      const g=this.reject;
+      for(const [dc,dr] of g.cells){ const c=g.col+dc, r=g.row+dr;
+        if(c<0||c>=this.COLS||r<0||r>=this.ROWS) continue;
+        const x0=this.GX+c*CELL, y0=this.GY+r*CELL; ctx.save(); ctx.globalAlpha=0.35; ctx.fillStyle='#ff5a5a'; rr(x0+3,y0+3,CELL-6,CELL-6,6); ctx.fill(); ctx.restore(); }
+    }
+    drawFX();
+    // tray of 3
+    for(let i=0;i<3;i++){ const rrc=this.traySlotRect(i), has=i<this.tray.length, on=this.sel===i;
+      ctx.save(); ctx.globalAlpha=has?1:0.25;
+      rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.fillStyle=on?p.acc+'44':'rgba(0,0,0,0.35)'; ctx.fill();
+      ctx.strokeStyle=on?p.glow:p.ring+'66'; ctx.lineWidth=on?2.5:1.5; rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.stroke();
+      if(has){ const s=this.SHAPES[this.tray[i]], cells=on?this.orisFor(this.tray[i])[this.rot%this.orisFor(this.tray[i]).length]:this.ORIS[this.tray[i]][0];
+        this.drawPiece(rrc.x+rrc.w/2,rrc.y+rrc.h/2-4,cells,13,s.col,1);
+        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='center'; ctx.fillText(s.name,rrc.x+rrc.w/2,rrc.y+rrc.h-6); }
+      ctx.restore();
+    }
+    // ROTATE button (drawn, rule 4) — dim when nothing held
+    const rb=this.rotRect(), canRot=this.sel>=0&&this.orisFor(this.tray[this.sel]).length>1;
+    ctx.save(); ctx.globalAlpha=this.sel>=0?(canRot?1:0.5):0.35;
+    rr(rb.x,rb.y,rb.w,rb.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(rb.x,rb.y,rb.w,rb.h,10); ctx.stroke();
+    const rcx=rb.x+22, rcy=rb.y+rb.h/2; // circular arrow
+    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(rcx,rcy,9,-0.4,Math.PI*1.5); ctx.stroke();
+    const ex=rcx+Math.cos(Math.PI*1.5)*9, ey=rcy+Math.sin(Math.PI*1.5)*9; ctx.fillStyle=p.glow;
+    ctx.beginPath(); ctx.moveTo(ex,ey-1); ctx.lineTo(ex-5,ey-4); ctx.lineTo(ex-1,ey+4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('ROTATE',rb.x+40,rcy+3);
+    ctx.restore();
+    // banner (FRESH! / HEAT ESCAPED!)
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='12px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,132); ctx.restore(); }
+    // rank
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-30);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-16); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,'DAIRY WARMER',['TAP A PASTRY TO PICK IT UP','TAP ROTATE TO TURN IT','TAP A SHELF CELL TO PLACE','FILL A ROW TO SERVE IT FRESH']);
+    if(this.st==='over') drawOverScreen(p,'WARMER WENT COLD',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'ROWS '+this.rowsCleared+' · SERVED '+this.served);
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // ROTATE button
+    if(inR(x,y,this.rotRect())){
+      if(this.sel>=0){ const n=this.orisFor(this.tray[this.sel]).length; if(n>1){ this.rot=(this.rot+1)%n; sTick(0.04); buzz(6); } else { this.rejectAt=performance.now(); } }
+      else this.rejectAt=performance.now(); // nothing held → free no-op
+      return;
+    }
+    // tray select
+    for(let i=0;i<this.tray.length;i++){ if(inR(x,y,this.traySlotRect(i))){ this.sel=i; this.rot=0; this.reject=null; sTick(0.05); buzz(6); return; } }
+    // shelf place
+    const CELL=this.CELL, col=Math.floor((x-this.GX)/CELL), row=Math.floor((y-this.GY)/CELL);
+    if(col>=0&&col<this.COLS&&row>=0&&row<this.ROWS){
+      if(this.sel>=0) this.place(col,row);
+      else this.rejectAt=performance.now(); // no piece held → free no-op
+      return;
+    }
+    this.rejectAt=performance.now(); // stray tap = free no-op
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
+//  KNUCKLEBONES  (digitised jacks — catch the toss)
 //  Gold bones = CATCH (tap airborne); grey bones = SKIP (leave them).
 //  A missed catch OR a wrong tap = a drop; 3 drops = over. The traditional
 //  sequence is the level ladder; it loops endlessly, faster, after the top.
@@ -1930,766 +2690,6 @@ const KNUCKLEBONES={
 };
 
 // ════════════════════════════════════════════════════════════════
-//  GAME 7: GUNGE  (Phase 5.2 — the gunge-tank pipe puzzle)
-//  Verb: tap-to-rotate. The hub's only puzzle — think under a clock,
-//  don't react. Tap a 5×5 pipe tile to rotate it 90°; connect the
-//  top valve to the bottom tank, then hit the drawn RELEASE valve to
-//  let the neon gunge flow. Tap-only (no press()) — stays on tap()
-//  per D12/§3. Joins the daily (D11); endless + 3 lives (D14).
-//
-//  D16 — the board is generated correct-by-construction, never
-//  generate-and-hope. genBoard(): carve ONE simple source→dest path
-//  (randomised DFS), assign each path cell the SHAPE its two
-//  connections require (straight or elbow — always a 2-opening tile,
-//  so a solved path never branches into a decoy and cannot leak),
-//  drop random decoy tiles in the rest, then scramble ONLY rotations.
-//  Every shape's solving orientation is one of its 4 rotations, so a
-//  solution provably exists after any scramble — a shared unsolvable
-//  daily board is structurally impossible. All draws route through
-//  srnd(this): daily is reproducible, free play uses Math.random.
-//
-//  RELEASE valve (D17) — remaining time only banks as score if you
-//  commit early. Outcome matrix:
-//    release,       solved     → score += remaining × segments, advance
-//    release,       mis-solved → leak, lose a life
-//    auto-release@0, solved     → gunge lands, 0 points, NO life lost
-//    auto-release@0, mis-solved → leak, lose a life
-//  ("solved" = gunge reaches the tank cleanly with no spill. Segments
-//  is fixed by the generated path, so the gamble is time-vs-commit,
-//  not "did I misread my pipes" — connected pipes are lit from the
-//  source so the board is always readable. The valve sits well clear
-//  of the grid at the bottom (DAIRY-button style); tapping it can
-//  cost a life, but §8 holds — stray taps elsewhere are free no-ops,
-//  and there is no confirm dialog: the snap decision is the point.)
-// ════════════════════════════════════════════════════════════════
-const GUNGE={
-  id:'gunge', name:'GUNGE', tag:'CONNECT THE PIPES',
-  bestKey:'arc_gunge_best',
-  par:300, // PROVISIONAL — pure guess against remaining×segments; instrument early
-  ranks:[{s:0,t:'STUDIO AUDIENCE'},{s:150,t:'BUCKET CATCHER'},{s:400,t:'PIPE PLUMBER'},{s:800,t:'VALVE MASTER'},{s:1400,t:'GUNGE TANK LEGEND'}], // PROVISIONAL
-  GX:30, GY:150, GRID_PX:300,           // grid box (logical px); cell size derives from N
-  TIME_BASE:48, TIME_STEP:3.6, TIME_FLOOR:21, // per-board countdown (s) — PROVISIONAL (3× the original 16/1.2/7 — owner asked for more solve time)
-  FILL_STEP:0.055,                      // seconds per cell of the release animation
-  PW:0.30,                              // pipe width as a fraction of the cell
-  // Direction bits: N=1 E=2 S=4 W=8. Shapes (base masks): straight 5, elbow 3, tee 7, dead 1.
-  DIRS:[1,2,4,8],
-  init(){
-    this.N=5; this.cell=this.GRID_PX/this.N;
-    this.lives=3; this.score=0; this.stage=0;
-    this.phase='build';           // 'build' (rotating) | 'flow' (gunge propagating)
-    this.result=null; this.fillN=0; this.stopN=0; this.flowT=0;
-    this.shake=0; this.banner=null; this.rejectAt=0;
-    this.best=loadBest(this.bestKey);
-    this.newBest=false; this.st='ready'; this.overAt=0;
-    parts=[]; pops=[];
-    this.genBoard();
-  },
-  pal(){ return PALS[6]; }, // slime lime
-  start(){ this.st='play'; },
-  // ── geometry helpers ──
-  nbIdx(idx,bit){
-    const N=this.N; let c=idx%N, r=(idx/N)|0;
-    if(bit===1) r--; else if(bit===4) r++; else if(bit===2) c++; else c--;
-    return (c<0||c>=N||r<0||r>=N) ? -1 : r*N+c;
-  },
-  opp(bit){ return bit===1?4:bit===4?1:bit===2?8:2; },
-  rotCW(m){ return ((m<<1)|(m>>3))&15; },
-  rotMask(shape,r){ let m=shape; for(let i=0;i<(r&3);i++) m=this.rotCW(m); return m; },
-  dirBit(from,to){ // bit on 'from' pointing at adjacent 'to'
-    const N=this.N, d=to-from;
-    if(d===-N) return 1; if(d===N) return 4; if(d===1) return 2; return 8;
-  },
-  shapeFor(mask){ return (mask===5||mask===10) ? 5 : 3; }, // 2 collinear bits → straight, else elbow
-  // ── D16 board generation: solved-then-scrambled ──
-  carve(src,dst){ // randomised DFS → one simple path src→dst
-    const N=this.N, seen=new Array(N*N).fill(false), path=[], self=this;
-    function dfs(idx){
-      seen[idx]=true; path.push(idx);
-      if(idx===dst) return true;
-      const ds=self.DIRS.slice();
-      for(let i=ds.length-1;i>0;i--){ const j=Math.floor(srnd(self)*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
-      for(let k=0;k<ds.length;k++){ const n=self.nbIdx(idx,ds[k]); if(n>=0&&!seen[n]&&dfs(n)) return true; }
-      path.pop(); seen[idx]=false; return false;
-    }
-    dfs(src);
-    return path;
-  },
-  genBoard(){
-    const N=this.N=(this.stage>=3?6:5);
-    this.cell=this.GRID_PX/N;
-    const src=Math.floor(srnd(this)*N);              // source on the top edge (valve inlet from N)
-    const dst=(N-1)*N+Math.floor(srnd(this)*N);      // dest on the bottom edge (tank outlet to S)
-    this.srcIdx=src; this.dstIdx=dst;
-    const path=this.carve(src,dst);
-    const mask=new Array(N*N).fill(0);
-    for(let i=0;i<path.length;i++){
-      const idx=path[i]; let m=0;
-      if(i>0) m|=this.dirBit(idx,path[i-1]);
-      if(i<path.length-1) m|=this.dirBit(idx,path[i+1]);
-      if(idx===src) m|=1;   // valve inlet
-      if(idx===dst) m|=4;   // tank outlet
-      mask[idx]=m;
-    }
-    const decoy=[5,3,7,1];
-    this.tiles=new Array(N*N);
-    for(let idx=0;idx<N*N;idx++){
-      const shape = mask[idx] ? this.shapeFor(mask[idx]) : decoy[Math.floor(srnd(this)*decoy.length)];
-      this.tiles[idx]={shape, r:0, path:!!mask[idx]};
-    }
-    for(let idx=0;idx<N*N;idx++) this.tiles[idx].r=Math.floor(srnd(this)*4); // scramble rotations ONLY
-    this.timeLeft=this.stageTime();
-    this.phase='build'; this.result=null; this.fillN=0; this.flowT=0;
-    this.recompute();
-  },
-  stageTime(){ return Math.max(this.TIME_FLOOR, this.TIME_BASE-this.stage*this.TIME_STEP); },
-  // ── connectivity: flood from the source through matching openings ──
-  flow(){
-    const N=this.N, src=this.srcIdx, dst=this.dstIdx;
-    const open=idx=>this.rotMask(this.tiles[idx].shape,this.tiles[idx].r);
-    const lit=new Array(N*N).fill(false), order=[];
-    let leaked=false, leakCell=-1;
-    if(open(src)&1){                                   // gunge only enters if the source accepts the valve
-      const q=[src]; lit[src]=true;
-      while(q.length){
-        const idx=q.shift(); order.push(idx); const om=open(idx);
-        for(let d=0;d<4;d++){ const b=this.DIRS[d]; if(!(om&b)) continue;
-          const n=this.nbIdx(idx,b);
-          if(n<0){ const legit=(idx===src&&b===1)||(idx===dst&&b===4);
-            if(!legit&&leakCell<0){ leaked=true; leakCell=idx; } continue; }
-          if(open(n)&this.opp(b)){ if(!lit[n]){ lit[n]=true; q.push(n); } }
-          else if(leakCell<0){ leaked=true; leakCell=idx; }   // open pipe spilling against a wall
-        }
-      }
-    }
-    const reachedDest = lit[dst] && !!(open(dst)&4);
-    return {lit, order, leaked, leakCell, reachedDest, segments:order.length};
-  },
-  recompute(){ this.flowInfo=this.flow(); }, // cached lighting for the build phase
-  // ── release the valve (manual, or auto at timeLeft 0) ──
-  release(){
-    if(this.phase!=='build') return;
-    const f=this.result=this.flow();
-    this.solved = f.reachedDest && !f.leaked;
-    this.gained = this.solved ? Math.max(0,Math.round(this.timeLeft))*f.segments : 0;
-    this.stopN = f.leaked ? (f.order.indexOf(f.leakCell)+1) : f.order.length;
-    this.phase='flow'; this.flowT=0; this.fillN=0;
-    sTick(0.05);
-  },
-  resolveFlow(){
-    const f=this.result;
-    if(this.solved){
-      this.score+=this.gained;
-      if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
-      const d=this.dstIdx, N=this.N, cx=this.GX+(d%N)*this.cell+this.cell/2, cy=this.GY+((d/N)|0)*this.cell+this.cell/2;
-      burst(cx,cy,this.pal().glow,18,4); burst(cx,cy,'#eaffcf',8,2.6);
-      pop(this.gained>0?'+'+this.gained:'GUNGED!',cx,cy-20,this.pal().ring,8);
-      sGold(); buzz(20); this.shake=6;
-      this.stage++; this.banner={t:'GUNGED!',life:1.3}; this.genBoard();
-    } else {
-      const lc=f.leakCell>=0?f.leakCell:this.srcIdx, N=this.N;
-      const cx=this.GX+(lc%N)*this.cell+this.cell/2, cy=this.GY+((lc/N)|0)*this.cell+this.cell/2;
-      burst(cx,cy,'#a6ff44',16,3.8); pop('LEAK!',cx,cy-20,'#ff5a5a',8);
-      sBad(); buzz(50); this.shake=8; this.lives--;
-      if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
-      else this.genBoard(); // fresh board, same stage
-    }
-  },
-  update(dt){
-    this.shake*=0.82;
-    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
-    if(this.st!=='play') return;
-    if(this.phase==='build'){
-      this.timeLeft-=dt;
-      if(this.timeLeft<=0){ this.timeLeft=0; this.release(); } // auto-release banks no time
-    } else if(this.phase==='flow'){
-      this.flowT+=dt;
-      this.fillN=Math.min(this.stopN, Math.floor(this.flowT/this.FILL_STEP));
-      if(this.fillN>=this.stopN) this.resolveFlow();
-    }
-  },
-  // ── drawing ──
-  valveRect(){ return {x:W/2-74, y:466, w:148, h:46}; },
-  drawTile(idx){
-    const N=this.N, s=this.cell, col=idx%N, row=(idx/N)|0;
-    const x0=this.GX+col*s, y0=this.GY+row*s, cx=x0+s/2, cy=y0+s/2;
-    const p=this.pal(), t=this.tiles[idx], om=this.rotMask(t.shape,t.r);
-    const filled = this.phase==='flow' && this.result && this.result.order.indexOf(idx)>=0 && this.result.order.indexOf(idx)<this.fillN;
-    const lit = this.phase==='build' && this.flowInfo && this.flowInfo.lit[idx];
-    // tile base
-    rr(x0+2,y0+2,s-4,s-4,7); ctx.fillStyle='#0c1a08'; ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=1; rr(x0+2,y0+2,s-4,s-4,7); ctx.stroke();
-    // pipe arms
-    const pw=s*this.PW, col2 = filled?p.glow : lit?p.ring : '#4a5a3a';
-    ctx.save();
-    if(filled){ ctx.shadowColor=p.glow; ctx.shadowBlur=12; } else if(lit){ ctx.shadowColor=p.ring; ctx.shadowBlur=6; }
-    ctx.fillStyle=col2;
-    if(om&1){ rr(cx-pw/2,y0,pw,s/2+2,pw*0.4); ctx.fill(); }
-    if(om&4){ rr(cx-pw/2,cy-2,pw,s/2+2,pw*0.4); ctx.fill(); }
-    if(om&2){ rr(cx-2,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
-    if(om&8){ rr(x0,cy-pw/2,s/2+2,pw,pw*0.4); ctx.fill(); }
-    ctx.beginPath(); ctx.arc(cx,cy,pw*0.62,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-    // endpoint markers
-    if(idx===this.srcIdx){ ctx.fillStyle=p.acc; rr(cx-9,y0-6,18,7,2); ctx.fill(); }       // valve cap above source
-    if(idx===this.dstIdx){ ctx.fillStyle=p.acc; rr(cx-11,y0+s-1,22,7,2); ctx.fill(); }     // tank lip below dest
-  },
-  render(){
-    const p=this.pal();
-    ctx.save();
-    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
-    drawBG(p);
-    // HUD
-    ctx.textAlign='center';
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
-    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
-      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
-    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('STAGE '+(this.stage+1),W/2,128);
-    // countdown bar (the puzzle clock — not a score cap; game is endless, D3)
-    const bx=44, bw=W-88, frac=Math.max(0,Math.min(1,this.timeLeft/this.stageTime()));
-    rr(bx-1,135,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
-    ctx.fillStyle=frac<0.25?'#ff5a5a':(frac<0.5?'#ffd24a':p.ring);
-    rr(bx,136,Math.max(0,bw*frac),6,2); ctx.fill();
-    // grid
-    for(let idx=0;idx<this.N*this.N;idx++) this.drawTile(idx);
-    drawFX();
-    // RELEASE valve button (drawn, rule 4)
-    const v=this.valveRect(), enabled=this.phase==='build'&&this.st==='play';
-    ctx.save(); ctx.globalAlpha=enabled?1:0.4;
-    rr(v.x,v.y,v.w,v.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
-    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(v.x,v.y,v.w,v.h,10); ctx.stroke();
-    const vcx=v.x+26, vcy=v.y+v.h/2; // little valve wheel
-    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(vcx,vcy,9,0,Math.PI*2); ctx.stroke();
-    for(let a=0;a<4;a++){ const an=a*Math.PI/2; ctx.beginPath(); ctx.moveTo(vcx+Math.cos(an)*9,vcy+Math.sin(an)*9); ctx.lineTo(vcx+Math.cos(an)*14,vcy+Math.sin(an)*14); ctx.stroke(); }
-    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('RELEASE',v.x+44,vcy+3);
-    ctx.restore();
-    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
-    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
-      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='11px "Press Start 2P"';
-      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,148); ctx.restore(); }
-    // rank
-    const rk=rankFor(this.ranks,this.score);
-    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
-    const nx=nextRank(this.ranks,this.score);
-    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
-    ctx.restore();
-    if(this.st==='ready') drawReadyScreen(p,'GUNGE',['TAP A PIPE TO ROTATE IT','CONNECT THE TOP VALVE TO THE TANK','LIT PIPES ARE LINKED TO THE VALVE','HIT RELEASE EARLY TO BANK THE CLOCK']);
-    if(this.st==='over') drawOverScreen(p,'TANK OVERFLOWED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STAGE '+(this.stage+1));
-  },
-  tap(x,y){
-    if(this.st==='ready'){ this.start(); return; }
-    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
-    if(this.phase!=='build') return;                     // locked while the gunge is flowing
-    if(inR(x,y,this.valveRect())){ this.release(); return; }
-    const N=this.N, s=this.cell;
-    const col=Math.floor((x-this.GX)/s), row=Math.floor((y-this.GY)/s);
-    if(col<0||col>=N||row<0||row>=N){ this.rejectAt=performance.now(); return; } // outside grid = free no-op
-    const idx=row*N+col; this.tiles[idx].r=(this.tiles[idx].r+1)&3;
-    this.recompute(); sTick(0.03); buzz(6);
-  }
-};
-
-// ════════════════════════════════════════════════════════════════
-//  GAME: TAZO TYCOON  (Phase 5, Unit 5 — §5.3)
-//  Directional-swipe 2048 over chip-packet tazos. The hub's only pure
-//  spatial-strategy game — NO time pressure by nature (D3-friendly).
-//  Verb = COARSE swipe: press() records the origin, release() picks the
-//  dominant axis past DIR_THRESH → U/D/L/R. drag() is deliberately
-//  absent (D12/§5.3 — a 2048 board wants no live preview), so the router
-//  leaves cur.drag undefined and just streams press→release. tap() is
-//  only ever reached for ready-start / over-restart (router calls it on
-//  release when st!=='play') — gameplay never touches it.
-//
-//  ── ESCALATING SPAWN PRESSURE is a FIRST-CLASS mechanic (§5.3 makes it
-//  a design REQUIREMENT, not polish): an 11-game daily cannot carry a
-//  10-minute 2048 run. Two curves govern run length, both climbing as
-//  you play:
-//    (1) spawn COUNT  = min(SPAWN_CAP, 1 + floor(moves/SPAWN_K)) — tiles
-//        per move grow with MOVES (inevitable, skill-proof), so free
-//        space eventually collapses no matter how well you play.
-//    (2) spawn floor-TIER rises with SCORE (TIER_BANDS) — the board
-//        clots with holo/gold that a single low merge can't clear.
-//  The tier-4 MEGA SLAMMER is the opposing RELIEF valve: forming one
-//  (gold+gold) detonates the low-tier CLUTTER around it (orthogonal
-//  neighbours of tier ≤ SLAM_MAXTIER) and is consumed. Clearing only
-//  clutter makes the valve self-weaken late (fewer low tiles as the
-//  board climbs), so it extends play without becoming an infinite pump —
-//  the failure mode a full-radius detonation caused in sim. Retune the
-//  run length via SPAWN_K / TIER_BANDS (a time cap is forbidden — D3),
-//  NOT by nerfing the merge.
-//
-//  Numbers below are SIM-DERIVED this session (no human play): a headless
-//  replica measured greedy-optimal ≈3.3 min median run (p90 ≈10.8 min),
-//  random ≈2.8 min; a mega slammer forms in a typical run. par set so a
-//  careful daily run lands ~200–290 normalised (only god-runs peg 625) —
-//  the GUNGE-par lesson (§7). Flip CALIBRATE on to log real moves+seconds
-//  per run; ALL PROVISIONAL — retune with the roster (§7).
-//
-//  Loss = board full with NO legal merge in any direction: ONE terminal
-//  state. This is a DELIBERATE divergence from D14's "3-lives" reading —
-//  2048's natural loss is a single board-lock, par-normalisation still
-//  works on the resulting score, and D14 explicitly allows revisit.
-//  Seeded (D16-trivial — a 2048 board is always playable): spawn slots +
-//  tiers via srnd(), so the daily replays identically. Reuses drawBG /
-//  ready+over screens / burst+pop. (Section labels track FILE order — §7.)
-// ════════════════════════════════════════════════════════════════
-const TAZO_COL=[ // tier → disc colours (holo-blue family, PALS[7]); drawn, rule 4
-  {face:'#243357',edge:'#6a8cff',glow:'#6a8cff',pip:'#cdd8ff'}, // 0 plastic
-  {face:'#5a4620',edge:'#e0a84a',glow:'#ffcc66',pip:'#ffe6b0'}, // 1 cardboard
-  {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo
-  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold
-  {face:'#8a8ad0',edge:'#ffffff',glow:'#ffffff',pip:'#ffffff'}, // 4 mega slammer (transient — detonates on formation, never rests)
-];
-const TAZO={
-  id:'tazo', name:'TAZO TYCOON', tag:'SWIPE TO STACK SLAMMERS',
-  bestKey:'arc_tazo_best',
-  par:4500, // PROVISIONAL — sim-derived (greedy median ≈5257); retune with the roster (§5.6/§7)
-  ranks:[{s:0,t:'SWAPSIE ROOKIE'},{s:800,t:'LUNCHTIME TRADER'},{s:2500,t:'HOLO HOARDER'},{s:6000,t:'GOLD SLAMMER'},{s:14000,t:'TAZO TYCOON'}],
-
-  // ── board geometry (360×640 logical, rule 2) ────────────────────
-  N:4, GX:36, GY:198, CELL:66, GAP:6, // 4×66 + 3×6 = 282 wide, centred-ish
-
-  // ── swipe → direction ───────────────────────────────────────────
-  DIR_THRESH:30, // px — below this the gesture is a harmless no-op, no penalty (§8)
-
-  // ── ESCALATING SPAWN PRESSURE (first-class — ALL PROVISIONAL) ────
-  SPAWN_K:6,   // spawn count steps up every SPAWN_K moves
-  SPAWN_CAP:12,// hard ceiling on tiles/move (12 floods a 16-cell board fast)
-  MAX_TIER:4,  // 4 = mega slammer (transient, detonates on formation)
-  SLAM_MAXTIER:1, // detonation clears orthogonal neighbours up to this tier (clutter only)
-  // spawn floor-tier by score: rising score drops tier-0 so the board clots
-  TIER_BANDS:[
-    {s:0,   pool:[0,0,0,0,1]}, // mostly plastic
-    {s:60,  pool:[0,0,1,1,2]}, // cardboard creeps in
-    {s:180, pool:[0,1,1,2,2]}, // holo pressure
-    {s:360, pool:[1,1,2,2,3]}, // gold clutter, no more plastic
-  ],
-  MERGE_PTS:[0,3,8,20,0], // points for MERGING INTO tier t (t=4 scored via the slam)
-  SLAM_PTS:6,             // per cell a mega slammer clears (incl. itself)
-  SLIDE_T:0.09, BUMP_T:0.16, // animation seconds
-
-  CALIBRATE:false, // logs moves + seconds + score per run to console on game over (§7)
-
-  cellXY(i){ const r=Math.floor(i/this.N), c=i%this.N;
-    return {x:this.GX+c*(this.CELL+this.GAP), y:this.GY+r*(this.CELL+this.GAP)}; },
-  spawnCount(){ return Math.min(this.SPAWN_CAP, 1+Math.floor(this.moves/this.SPAWN_K)); },
-  tierPool(){ let b=this.TIER_BANDS[0]; this.TIER_BANDS.forEach(x=>{ if(this.score>=x.s) b=x; }); return b.pool; },
-
-  init(){
-    this.best=loadBest(this.bestKey); this.newBest=false;
-    this.score=0; this.moves=0; this.slams=0; this.topTier=0;
-    this.cells=new Array(this.N*this.N).fill(-1);        // logical board: tier or -1
-    this.bump=new Array(this.N*this.N).fill(0);          // per-cell merge/spawn scale bounce
-    this.slideFrom=new Array(this.N*this.N).fill(null);  // {dx,dy} px a tile slid from
-    this.slideT=0; this.shake=0; this.rejectFlash=0;
-    this.aim=null; this.startAt=performance.now();
-    this.st='ready'; this.overAt=0;
-    parts=[]; pops=[];
-    this.spawnTiles(2);            // opening board
-    this.slideFrom.fill(null);     // no slide on the very first tiles
-    this.bump.fill(0);
-  },
-  start(){ this.st='play'; this.startAt=performance.now(); },
-  gameOver(){
-    this.st='over'; this.overAt=performance.now();
-    if(this.CALIBRATE){ const secs=((performance.now()-this.startAt)/1000).toFixed(1);
-      console.log('TAZO run: moves='+this.moves+' secs='+secs+' score='+this.score+' slams='+this.slams+' top='+this.topTier); }
-    sBad(); buzz(70); if(this.onOver) this.onOver();
-  },
-
-  // ── pointer stream (D12): press + release, drag ignored (§5.3) ───
-  press(x,y){ this.aim={x0:x,y0:y}; },
-  release(x,y){
-    const a=this.aim; this.aim=null;
-    if(!a || this.st!=='play') return; // pointercancel with no drag lands here → no-op below
-    const dx=x-a.x0, dy=y-a.y0;
-    if(Math.max(Math.abs(dx),Math.abs(dy))<this.DIR_THRESH){ this.rejectFlash=1; sTick(0.02); return; } // §8 free no-op
-    const dir=Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');
-    this.move(dir);
-  },
-  tap(x,y){
-    if(this.st==='ready'){ this.start(); return; }
-    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
-    // during play the router routes to press/release — never here (D12)
-  },
-
-  // cell indices of each line in dest→far order for a given direction
-  lines(dir){
-    const N=this.N, out=[];
-    for(let k=0;k<N;k++){ const ln=[];
-      for(let j=0;j<N;j++){
-        if(dir==='L') ln.push(k*N+j);
-        else if(dir==='R') ln.push(k*N+(N-1-j));
-        else if(dir==='U') ln.push(j*N+k);
-        else ln.push((N-1-j)*N+k); // 'D'
-      }
-      out.push(ln);
-    }
-    return out;
-  },
-  move(dir){
-    const N=this.N, next=new Array(N*N).fill(-1), from=new Array(N*N).fill(null), merges=[];
-    let moved=false;
-    for(const ln of this.lines(dir)){
-      const seq=[]; for(const idx of ln){ if(this.cells[idx]>=0) seq.push({t:this.cells[idx],src:idx}); }
-      const out=[];
-      for(let i=0;i<seq.length;i++){
-        if(i+1<seq.length && seq[i].t===seq[i+1].t && seq[i].t<this.MAX_TIER){
-          out.push({t:seq[i].t+1, src:seq[i].src, merged:true}); i++; // consume the pair (once per tile per move)
-        } else out.push({t:seq[i].t, src:seq[i].src, merged:false});
-      }
-      for(let pos=0;pos<out.length;pos++){
-        const destIdx=ln[pos], tile=out[pos];
-        next[destIdx]=tile.t;
-        if(tile.src!==destIdx || tile.merged){ const sc=this.cellXY(tile.src), dc=this.cellXY(destIdx); from[destIdx]={dx:sc.x-dc.x,dy:sc.y-dc.y}; }
-        if(tile.src!==destIdx) moved=true;
-        if(tile.merged){ moved=true; merges.push({idx:destIdx,tier:tile.t}); }
-      }
-    }
-    if(!moved){ this.rejectFlash=1; sTick(0.02); return; } // no change = free no-op (§8)
-    this.cells=next; this.slideFrom=from; this.slideT=1; this.moves++;
-    for(const m of merges){
-      this.bump[m.idx]=1; this.topTier=Math.max(this.topTier,m.tier);
-      const q=this.cellXY(m.idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
-      if(m.tier>=this.MAX_TIER){ this.detonate(m.idx); }
-      else {
-        this.score+=this.MERGE_PTS[m.tier];
-        pop('+'+this.MERGE_PTS[m.tier],cx,cy-6,TAZO_COL[m.tier].glow,7);
-        burst(cx,cy,TAZO_COL[m.tier].glow,7,2.6);
-      }
-    }
-    sHit(); this.clack(); buzz(8);
-    this.spawnTiles(this.spawnCount());  // ESCALATING SPAWN PRESSURE — after every effective move
-    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
-    if(!this.hasMove()) this.gameOver();
-  },
-  detonate(idx){
-    this.slams++;
-    const N=this.N, r=Math.floor(idx/N), c=idx%N;
-    const q=this.cellXY(idx), cx=q.x+this.CELL/2, cy=q.y+this.CELL/2;
-    let cleared=0;
-    for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){ // orthogonal clutter only
-      const rr2=r+dr, cc=c+dc; if(rr2<0||rr2>=N||cc<0||cc>=N) continue;
-      const j=rr2*N+cc;
-      if(this.cells[j]>=0 && this.cells[j]<=this.SLAM_MAXTIER){ this.cells[j]=-1; cleared++;
-        const w=this.cellXY(j); burst(w.x+this.CELL/2,w.y+this.CELL/2,'#a6c8ff',6,2.4); }
-    }
-    this.cells[idx]=-1; // the slammer is consumed (transient tier-4)
-    const pts=this.SLAM_PTS*(cleared+1); this.score+=pts;
-    pop('SLAM! +'+pts,cx,cy-8,'#ffffff',9);
-    burst(cx,cy,'#ffffff',18,3.6); this.shake=1; sGold(); buzz(30);
-  },
-  spawnTiles(n){
-    const empties=[]; for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) empties.push(i);
-    const pool=this.tierPool(); n=Math.min(n,empties.length);
-    for(let k=0;k<n;k++){
-      const idx=empties.splice(Math.floor(srnd(this)*empties.length),1)[0];
-      this.cells[idx]=pool[Math.floor(srnd(this)*pool.length)];
-      this.bump[idx]=0.7; // gentle spawn pop
-    }
-  },
-  hasMove(){
-    const N=this.N;
-    for(let i=0;i<this.cells.length;i++) if(this.cells[i]<0) return true;
-    for(let r=0;r<N;r++) for(let c=0;c<N;c++){ const t=this.cells[r*N+c];
-      if(c+1<N && this.cells[r*N+c+1]===t && t<this.MAX_TIER) return true;
-      if(r+1<N && this.cells[(r+1)*N+c]===t && t<this.MAX_TIER) return true;
-    }
-    return false;
-  },
-  clack(){ beep(180,0.03,'square',0.05); beep(120,0.045,'triangle',0.04); }, // plastic tazo clack
-
-  update(dt){
-    if(this.rejectFlash>0) this.rejectFlash-=dt*3;
-    if(this.shake>0) this.shake-=dt*3;
-    if(this.slideT>0) this.slideT=Math.max(0,this.slideT-dt/this.SLIDE_T);
-    for(let i=0;i<this.bump.length;i++) if(this.bump[i]>0) this.bump[i]=Math.max(0,this.bump[i]-dt/this.BUMP_T);
-  },
-
-  drawTazo(cx,cy,tier,s){
-    const col=TAZO_COL[tier], R=this.CELL*0.44*s;
-    ctx.save(); ctx.translate(cx,cy);
-    const g=ctx.createRadialGradient(-R*0.3,-R*0.35,R*0.2,0,0,R);
-    g.addColorStop(0,col.edge); g.addColorStop(0.5,col.face); g.addColorStop(1,'#0a0f1e');
-    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
-    ctx.strokeStyle=col.edge; ctx.lineWidth=2.5; ctx.shadowColor=col.glow; ctx.shadowBlur=tier>=2?9:3;
-    ctx.beginPath(); ctx.arc(0,0,R-1.5,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
-    ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.arc(0,0,R*0.6,0,Math.PI*2); ctx.stroke();
-    drawMark(0,0,R*0.86,col.pip); // brand mark centre — hub cohesion (drawn, rule 4)
-    ctx.restore();
-  },
-  render(){
-    const p=PALS[7], N=this.N;
-    let ox=0,oy=0;
-    if(this.shake>0){ ox=(Math.random()-0.5)*7*this.shake; oy=(Math.random()-0.5)*7*this.shake; }
-    ctx.save(); ctx.translate(ox,oy);
-    drawBG(p,H-30);
-    const span=N*this.CELL+(N-1)*this.GAP, pad=8;
-    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14);
-    ctx.fillStyle='rgba(6,10,26,0.72)'; ctx.fill();
-    ctx.globalAlpha=this.rejectFlash>0?0.85:0.5; ctx.strokeStyle=this.rejectFlash>0?'#ff6a8a':p.ring; ctx.lineWidth=2;
-    rr(this.GX-pad,this.GY-pad,span+pad*2,span+pad*2,14); ctx.stroke(); ctx.globalAlpha=1;
-    for(let i=0;i<N*N;i++){ const q=this.cellXY(i);
-      rr(q.x,q.y,this.CELL,this.CELL,10); ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fill(); }
-    for(let i=0;i<N*N;i++){ if(this.cells[i]<0) continue;
-      const q=this.cellXY(i); let dx=0,dy=0;
-      if(this.slideT>0 && this.slideFrom[i]){ const e=this.slideT*this.slideT; dx=this.slideFrom[i].dx*e; dy=this.slideFrom[i].dy*e; }
-      const b=this.bump[i], scl=1+(b>0?Math.sin((1-b)*Math.PI*2)*0.16*b:0); // double-strike bounce
-      this.drawTazo(q.x+this.CELL/2+dx,q.y+this.CELL/2+dy,this.cells[i],scl);
-    }
-    drawFX();
-    ctx.restore();
-    // HUD (unshaken)
-    ctx.textAlign='center';
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.fillText(this.score,W/2,80); ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,100);
-    const spc=this.st==='play'?this.spawnCount():1; // surface the escalation to the player
-    ctx.font='6px "Press Start 2P"'; ctx.fillStyle=spc>=4?'#ff6a8a':spc>=2?'#ffd24a':'rgba(255,255,255,0.4)';
-    ctx.fillText('SPAWN ×'+spc,W/2,118);
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rankFor(this.ranks,this.score).t,W/2,H-14);
-    if(this.CALIBRATE){ ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#8aff8a'; ctx.textAlign='left';
-      ctx.fillText('mv='+this.moves+' spc='+spc+' sl='+this.slams,8,H-30); }
-    if(this.st==='ready') drawReadyScreen(p,'TAZO TYCOON',['SWIPE TO SLIDE THE TAZOS','MATCH TWO TO TRADE UP A TIER','GOLD+GOLD = MEGA SLAMMER','BOARD FILLS FASTER AS YOU CLIMB']);
-    if(this.st==='over') drawOverScreen(p,'BOARD LOCKED',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'MOVES '+this.moves+' · '+this.slams+' SLAMS');
-  }
-};
-
-// ════════════════════════════════════════════════════════════════
-//  GAME: DAIRY WARMER  (Phase 5, Unit 6 — §5.4)
-//  Spatial-packing on the corner-dairy pie warmer. The hub's only CALM
-//  game — no clock, no falling piece, no reaction test (D3-friendly).
-//  Verb = TAP-only (D13, settled): tap a pastry in the tray to SELECT it
-//  (held preview + rotation), tap the drawn ROTATE button to cycle its
-//  orientation, tap a shelf cell to PLACE it. NO drag, NO press() — so
-//  per D12/§3 the router leaves it on tap()-on-pointerdown, exactly like
-//  GUNGE. Blockdoku-style: place trominoes/tetromino anywhere on the 6×4
-//  shelf, a FULL HORIZONTAL ROW sells (clears) with a neon FRESH! flash,
-//  no gravity. Multi-row clears score exponentially (double-decker order).
-//
-//  Tray of 3, place in ANY ORDER (reading B, owner-approved 2026-07-18):
-//  §5.4's "tap a queued pastry to select" reads as free choice, which
-//  suits the calm ethos better than a forced FIFO head; the loss check is
-//  generalised from "the head can't fit" to "no tray piece fits anywhere".
-//  STRIKE = the whole tray is dead (D14, 3-lives): heat escapes, a life is
-//  lost, the shelf is WIPED (fresh warmer) and a new tray dealt — the wipe
-//  guarantees the fresh tray is placeable, so a strike can never chain in
-//  one frame. 3 strikes = over.
-//
-//  §8 holds throughout: tapping an invalid cell, an empty cell, or the
-//  rotate button with nothing held is a FREE no-op with a soft reject
-//  flash — never a strike. A strike is a board-state consequence, not a
-//  tap penalty. Seeded (D16-trivial): tray order via srnd(); placement /
-//  clear math stays live so free play is byte-identical. Reuses drawBG /
-//  ready+over screens / burst+pop / ranks (rule 9). par & all constants
-//  PROVISIONAL — retune with the roster (§5.6/§7). (Labels track FILE
-//  order — §7.)
-// ════════════════════════════════════════════════════════════════
-const DAIRY={
-  id:'dairy', name:'DAIRY WARMER', tag:'PACK THE PIE WARMER',
-  bestKey:'arc_dairy_best',
-  // par PROVISIONAL & SIM-INFORMED (no human play). A headless greedy replica over 200
-  // seeds scored median ≈4620 (p10 ≈2580, p90 ≈7980), median ≈147 placements/run — so the
-  // spec's par:250 would peg the 625 normaliser cap for ANY competent player (the GUNGE/TAZO
-  // par lesson). Set ~2200 so a strong run lands mid-band, not pegged. CAVEAT the other way:
-  // DAIRY has NO clock and a forgiving wipe-on-strike, so the greedy bot OVER-states a human
-  // (free row-clears + full resets) — real play may sit well below 4620, i.e. par may need to
-  // come DOWN after data, unlike the usual "too low" story. Retune with the roster (§7).
-  par:2200, // PROVISIONAL
-  ranks:[{s:0,t:'AFTER-SCHOOL REGULAR'},{s:400,t:'COUNTER HAND'},{s:1000,t:'WARMER WRANGLER'},{s:2000,t:'PIE ARCHITECT'},{s:3500,t:'DAIRY OWNER'}], // PROVISIONAL
-  COLS:6, ROWS:4, CELL:50, GX:30, GY:140,   // 6×4 glass shelf, 300×200 box
-  BASE_CLEAR:60,                             // per-row clear base — score += BASE×(2^rows − 1) (PROVISIONAL)
-  // Pastries as origin-relative [col,row] cells; orientations derived + deduped in init().
-  SHAPES:[
-    {name:'MINCE & CHEESE', col:'#e0a84a', cells:[[0,0],[1,0],[0,1],[1,1]]}, // 2×2 — 1 orientation
-    {name:'SAUSAGE ROLL',   col:'#d69a52', cells:[[0,0],[1,0],[2,0]]},       // 1×3 — 2 orientations
-    {name:'POTATO-TOP',     col:'#c07838', cells:[[0,0],[0,1],[1,1]]},       // L-tromino — 4 orientations
-  ],
-  pal(){ return PALS[8]; }, // warm caramel (hues PROVISIONAL, §3/§7)
-  // ── orientation maths (built once per init) ──
-  buildOris(){
-    const norm=cs=>{ const mc=Math.min(...cs.map(p=>p[0])), mr=Math.min(...cs.map(p=>p[1])); return cs.map(([c,r])=>[c-mc,r-mr]); };
-    const key=cs=>cs.map(p=>p[0]+','+p[1]).sort().join(';');
-    const rot=cs=>cs.map(([c,r])=>[-r,c]); // 90° CW about origin
-    this.ORIS=this.SHAPES.map(s=>{
-      const out=[], seen={}; let cur=s.cells;
-      for(let i=0;i<4;i++){ const n=norm(cur), k=key(n); if(!seen[k]){ seen[k]=1; out.push(n); } cur=rot(cur); }
-      return out;
-    });
-  },
-  init(){
-    this.buildOris();
-    this.grid=new Array(this.COLS*this.ROWS).fill(null); // null = empty, else pastry colour
-    this.tray=[]; this.sel=-1; this.rot=0;
-    this.lives=3; this.score=0; this.served=0; this.rowsCleared=0;
-    this.shake=0; this.banner=null; this.rejectAt=0; this.reject=null; // reject={cells,col,row}
-    this.best=loadBest(this.bestKey); this.newBest=false;
-    this.st='ready'; this.overAt=0;
-    parts=[]; pops=[];
-    this.dealTray();
-  },
-  start(){ this.st='play'; },
-  // ── tray / pieces ──
-  dealTray(){ while(this.tray.length<3) this.tray.push(Math.floor(srnd(this)*this.SHAPES.length)); },
-  orisFor(shapeIdx){ return this.ORIS[shapeIdx]; },
-  fits(cells,col,row){
-    for(const [dc,dr] of cells){ const c=col+dc, r=row+dr;
-      if(c<0||c>=this.COLS||r<0||r>=this.ROWS) return false;
-      if(this.grid[r*this.COLS+c]!==null) return false; }
-    return true;
-  },
-  canPlaceAny(shapeIdx){
-    const oris=this.orisFor(shapeIdx);
-    for(const o of oris) for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++) if(this.fits(o,c,r)) return true;
-    return false;
-  },
-  trayDead(){ return this.tray.every(s=>!this.canPlaceAny(s)); },
-  // ── placement + clears ──
-  place(col,row){
-    const shapeIdx=this.tray[this.sel], ori=this.orisFor(shapeIdx)[this.rot%this.orisFor(shapeIdx).length];
-    if(!this.fits(ori,col,row)){ // soft reject — free no-op (§8), red ghost so the misfit is legible
-      this.reject={cells:ori,col,row}; this.rejectAt=performance.now(); sBad(); return;
-    }
-    const s=this.SHAPES[shapeIdx];
-    for(const [dc,dr] of ori){ const c=col+dc, r=row+dr; this.grid[r*this.COLS+c]=s.col;
-      const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2; burst(cx,cy,s.col,4,1.8); }
-    this.served++; sHit(); buzz(8);
-    this.tray.splice(this.sel,1); this.sel=-1; this.rot=0; this.reject=null;
-    this.dealTray();
-    this.resolveClears();
-    if(this.st==='play' && this.trayDead()) this.strike();
-  },
-  resolveClears(){
-    const full=[];
-    for(let r=0;r<this.ROWS;r++){ let f=true; for(let c=0;c<this.COLS;c++) if(this.grid[r*this.COLS+c]===null){ f=false; break; } if(f) full.push(r); }
-    const n=full.length; if(!n) return;
-    const p=this.pal();
-    for(const r of full){ for(let c=0;c<this.COLS;c++){ const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2;
-      burst(cx,cy,p.glow,6,3); this.grid[r*this.COLS+c]=null; } }
-    this.rowsCleared+=n;
-    const gained=this.BASE_CLEAR*(Math.pow(2,n)-1); // exponential — double-decker order
-    this.score+=gained;
-    if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
-    const my=this.GY+full[0]*this.CELL+this.CELL/2;
-    pop((n>1?n+' ROWS! ':'')+'+'+gained,W/2,my-4,p.ring,9);
-    this.banner={t:n>1?'FRESH ×'+n+'!':'FRESH!',life:1.3};
-    if(n>1){ sGold(); this.shake=6; } else sPerfect();
-    buzz(n>1?24:12);
-  },
-  strike(){
-    this.lives--; this.shake=8; sBad(); buzz(50);
-    this.banner={t:'HEAT ESCAPED!',life:1.4};
-    pop('-1',W/2,this.GY+100,'#ff5a5a',10);
-    if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); return; }
-    this.grid.fill(null);          // heat escaped → empty the warmer, fresh shelf (guarantees a placeable tray)
-    this.tray=[]; this.sel=-1; this.rot=0; this.reject=null; this.dealTray();
-  },
-  update(dt){
-    this.shake*=0.82;
-    if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
-  },
-  // ── layout ──
-  rotRect(){ return {x:W-104, y:462, w:92, h:44}; },
-  traySlotRect(i){ const bw=98, gap=6, x0=W/2-(bw*3+gap*2)/2; return {x:x0+i*(bw+gap), y:372, w:bw, h:70}; },
-  // draw an orientation's cells centred in a box (tray/ghost previews)
-  drawPiece(cx,cy,cells,cell,col,alpha){
-    let mc=1e9,mr=1e9,xc=-1e9,xr=-1e9;
-    for(const [c,r] of cells){ mc=Math.min(mc,c); mr=Math.min(mr,r); xc=Math.max(xc,c); xr=Math.max(xr,r); }
-    const w=(xc-mc+1)*cell, h=(xr-mr+1)*cell, ox=cx-w/2-mc*cell, oy=cy-h/2-mr*cell;
-    ctx.save(); ctx.globalAlpha=alpha==null?1:alpha;
-    for(const [c,r] of cells){ const x=ox+c*cell, y=oy+r*cell; rr(x+1,y+1,cell-2,cell-2,4); ctx.fillStyle=col; ctx.fill(); }
-    ctx.restore();
-  },
-  render(){
-    const p=this.pal();
-    ctx.save();
-    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
-    drawBG(p);
-    // HUD
-    ctx.textAlign='center';
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
-    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
-    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
-      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
-    // shelf
-    const CELL=this.CELL;
-    for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++){
-      const x0=this.GX+c*CELL, y0=this.GY+r*CELL, v=this.grid[r*this.COLS+c];
-      rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.fillStyle=v?v:'#1a1206'; ctx.fill();
-      ctx.strokeStyle=v?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'; ctx.lineWidth=1; rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.stroke();
-      if(v){ ctx.fillStyle='rgba(255,255,255,0.14)'; rr(x0+6,y0+6,CELL-12,6,3); ctx.fill(); } // glass sheen
-    }
-    // glass shelf edges
-    ctx.strokeStyle=p.acc+'88'; ctx.lineWidth=2;
-    for(let r=0;r<=this.ROWS;r++){ const y=this.GY+r*CELL; ctx.beginPath(); ctx.moveTo(this.GX-4,y); ctx.lineTo(this.GX+this.COLS*CELL+4,y); ctx.stroke(); }
-    // reject ghost (soft misfit, §8)
-    if(this.reject&&performance.now()-this.rejectAt<220){
-      const g=this.reject;
-      for(const [dc,dr] of g.cells){ const c=g.col+dc, r=g.row+dr;
-        if(c<0||c>=this.COLS||r<0||r>=this.ROWS) continue;
-        const x0=this.GX+c*CELL, y0=this.GY+r*CELL; ctx.save(); ctx.globalAlpha=0.35; ctx.fillStyle='#ff5a5a'; rr(x0+3,y0+3,CELL-6,CELL-6,6); ctx.fill(); ctx.restore(); }
-    }
-    drawFX();
-    // tray of 3
-    for(let i=0;i<3;i++){ const rrc=this.traySlotRect(i), has=i<this.tray.length, on=this.sel===i;
-      ctx.save(); ctx.globalAlpha=has?1:0.25;
-      rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.fillStyle=on?p.acc+'44':'rgba(0,0,0,0.35)'; ctx.fill();
-      ctx.strokeStyle=on?p.glow:p.ring+'66'; ctx.lineWidth=on?2.5:1.5; rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.stroke();
-      if(has){ const s=this.SHAPES[this.tray[i]], cells=on?this.orisFor(this.tray[i])[this.rot%this.orisFor(this.tray[i]).length]:this.ORIS[this.tray[i]][0];
-        this.drawPiece(rrc.x+rrc.w/2,rrc.y+rrc.h/2-4,cells,13,s.col,1);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='center'; ctx.fillText(s.name,rrc.x+rrc.w/2,rrc.y+rrc.h-6); }
-      ctx.restore();
-    }
-    // ROTATE button (drawn, rule 4) — dim when nothing held
-    const rb=this.rotRect(), canRot=this.sel>=0&&this.orisFor(this.tray[this.sel]).length>1;
-    ctx.save(); ctx.globalAlpha=this.sel>=0?(canRot?1:0.5):0.35;
-    rr(rb.x,rb.y,rb.w,rb.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
-    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(rb.x,rb.y,rb.w,rb.h,10); ctx.stroke();
-    const rcx=rb.x+22, rcy=rb.y+rb.h/2; // circular arrow
-    ctx.strokeStyle=p.glow; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(rcx,rcy,9,-0.4,Math.PI*1.5); ctx.stroke();
-    const ex=rcx+Math.cos(Math.PI*1.5)*9, ey=rcy+Math.sin(Math.PI*1.5)*9; ctx.fillStyle=p.glow;
-    ctx.beginPath(); ctx.moveTo(ex,ey-1); ctx.lineTo(ex-5,ey-4); ctx.lineTo(ex-1,ey+4); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('ROTATE',rb.x+40,rcy+3);
-    ctx.restore();
-    // banner (FRESH! / HEAT ESCAPED!)
-    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
-      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='12px "Press Start 2P"';
-      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,132); ctx.restore(); }
-    // rank
-    const rk=rankFor(this.ranks,this.score);
-    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-30);
-    const nx=nextRank(this.ranks,this.score);
-    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-16); }
-    ctx.restore();
-    if(this.st==='ready') drawReadyScreen(p,'DAIRY WARMER',['TAP A PASTRY TO PICK IT UP','TAP ROTATE TO TURN IT','TAP A SHELF CELL TO PLACE','FILL A ROW TO SERVE IT FRESH']);
-    if(this.st==='over') drawOverScreen(p,'WARMER WENT COLD',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'ROWS '+this.rowsCleared+' · SERVED '+this.served);
-  },
-  tap(x,y){
-    if(this.st==='ready'){ this.start(); return; }
-    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
-    // ROTATE button
-    if(inR(x,y,this.rotRect())){
-      if(this.sel>=0){ const n=this.orisFor(this.tray[this.sel]).length; if(n>1){ this.rot=(this.rot+1)%n; sTick(0.04); buzz(6); } else { this.rejectAt=performance.now(); } }
-      else this.rejectAt=performance.now(); // nothing held → free no-op
-      return;
-    }
-    // tray select
-    for(let i=0;i<this.tray.length;i++){ if(inR(x,y,this.traySlotRect(i))){ this.sel=i; this.rot=0; this.reject=null; sTick(0.05); buzz(6); return; } }
-    // shelf place
-    const CELL=this.CELL, col=Math.floor((x-this.GX)/CELL), row=Math.floor((y-this.GY)/CELL);
-    if(col>=0&&col<this.COLS&&row>=0&&row<this.ROWS){
-      if(this.sel>=0) this.place(col,row);
-      else this.rejectAt=performance.now(); // no piece held → free no-op
-      return;
-    }
-    this.rejectAt=performance.now(); // stray tap = free no-op
-  }
-};
-
-// ════════════════════════════════════════════════════════════════
 //  GAME: WEAVER  (Phase 5.5, Unit 7 — the last Phase 5 game)
 //  1995 America's Cup red socks. Verb: CONTINUOUS DRAG — the only
 //  full pointer-stream consumer (press+drag+release all live, D12).
@@ -2732,7 +2732,7 @@ const DAIRY={
 //  abandoned drag can never hang a weave (§3). Seeded via srnd():
 //  carve, jitter, decoys, boat routes, flare routes — Nth-draw order
 //  is deterministic (HOWLER precedent), drag physics stay live.
-//  (Section labels track FILE order, not the daily order — §7.)
+//  (Source blocks now ordered to match the daily order — Unit 6.0.)
 // ════════════════════════════════════════════════════════════════
 const WEAVER={
   id:'weaver', name:'WEAVER', tag:'WEAVE THE RED THREAD',
