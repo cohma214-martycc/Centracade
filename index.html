@@ -2762,6 +2762,15 @@ const WEAVER={
   pal(){ return PALS[9]; }, // navy hull + red-sock accent (hues PROVISIONAL, §3/§7)
   stageTime(){ return Math.max(this.TIME_FLOOR, this.TIME_BASE-this.stage*this.TIME_STEP); },
   flarePeriod(){ return Math.max(this.FLARE_PERIOD_MIN, this.FLARE_PERIOD-this.stage*0.5); },
+  // B1 fix (§3 determinism model): WEAVER overrides the generic seed so the
+  // daily can SPLIT its seeded draws. From ONE fixed draw (taken before any
+  // board or hazard draw) we derive a stable integer base; genBoard/rollBoats
+  // then run on a per-stage board stream (fixed draw count ⇒ identical boards
+  // for everyone) while spawnFlare runs on a separate hazard stream (Nth flare
+  // route stays shared). Free play (rng null) ⇒ Math.random throughout.
+  seed(rng){ this.srng=rng||null; this.dailySeed = rng ? (rng()*4294967296)>>>0 : null; },
+  brnd(){ return this.boardRng ? this.boardRng() : Math.random(); }, // board/piece draws
+  hrnd(){ return this.hazRng ? this.hazRng() : Math.random(); },     // hazard draws
   init(){
     this.score=0; this.best=loadBest(this.bestKey); this.newBest=false;
     this.lives=3; this.stage=0; this.knits=0; this.runT=0;
@@ -2769,20 +2778,24 @@ const WEAVER={
     this.shake=0; this.banner=null; this.rejectAt=0;
     this.st='ready'; this.overAt=0;
     parts=[]; pops=[];
+    // Free play (srng null — set directly by the menu, bypassing seed()) clears
+    // any daily base left over; the hazard stream is created once per run.
+    if(!this.srng) this.dailySeed=null;
+    this.hazRng = this.dailySeed!=null ? mulberry32((this.dailySeed ^ hashStr('weaver-haz'))>>>0) : null;
     this.genBoard();
   },
   start(){ this.st='play'; },
   // ── D16 generation: Hamiltonian path FIRST, knots FROM the path ──
   carve(L){ // random simple path of exactly L cells on the GN×GN grid
     const N=this.GN, total=N*N, self=this;
-    const first=Math.floor(srnd(this)*total);
+    const first=Math.floor(this.brnd()*total);
     for(let s0=0;s0<total;s0++){ // fallback starts, deterministic order — carve can't fail
       const seen=new Array(total).fill(false), path=[];
       function dfs(idx){
         seen[idx]=true; path.push(idx);
         if(path.length===L) return true;
         const c=idx%N, r=(idx/N)|0, ds=[[0,-1],[1,0],[0,1],[-1,0]];
-        for(let i=ds.length-1;i>0;i--){ const j=Math.floor(srnd(self)*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
+        for(let i=ds.length-1;i>0;i--){ const j=Math.floor(self.brnd()*(i+1)); const t=ds[i]; ds[i]=ds[j]; ds[j]=t; }
         for(const [dc,dr] of ds){ const nc=c+dc, nr=r+dr;
           if(nc<0||nc>=N||nr<0||nr>=N) continue;
           const n=nr*N+nc; if(!seen[n]&&dfs(n)) return true; }
@@ -2793,11 +2806,16 @@ const WEAVER={
     return [first]; // unreachable for L ≤ MAX_NODES ≤ 14 on a 4×4 grid; keeps the contract total
   },
   genBoard(){
+    // B1 fix (§3): board draws (carve/jitter/decoys/boats) run on a per-stage
+    // stream with a FIXED draw count, so boards 1..k are byte-identical for every
+    // player regardless of weave pace; flares draw from the separate hazard
+    // stream (spawnFlare). Free play ⇒ Math.random via brnd()/hrnd().
+    this.boardRng = this.dailySeed!=null ? mulberry32((this.dailySeed ^ hashStr('weaver-board') ^ Math.imul(this.stage+1,2654435761))>>>0) : null;
     const L=Math.min(this.MAX_NODES,this.BASE_NODES+this.stage);
     const cells=this.carve(L), N=this.GN, cs=this.GRID_PX/N;
     this.nodes=cells.map(idx=>({
-      x:this.GX+(idx%N)*cs+cs/2+(srnd(this)*2-1)*this.JITTER,
-      y:this.GY+((idx/N)|0)*cs+cs/2+(srnd(this)*2-1)*this.JITTER,
+      x:this.GX+(idx%N)*cs+cs/2+(this.brnd()*2-1)*this.JITTER,
+      y:this.GY+((idx/N)|0)*cs+cs/2+(this.brnd()*2-1)*this.JITTER,
       cell:idx }));
     // ropes: the true path (i,i+1) + seeded decoys (grid-adjacent, NOT consecutive)
     this.adj=this.nodes.map(()=>[]);
@@ -2808,7 +2826,7 @@ const WEAVER={
       const a=this.nodes[i].cell, b=this.nodes[j].cell;
       if(Math.max(Math.abs(a%N-b%N),Math.abs(((a/N)|0)-((b/N)|0)))===1) cand.push([i,j]);
     }
-    for(let i=cand.length-1;i>0;i--){ const j=Math.floor(srnd(this)*(i+1)); const t=cand[i]; cand[i]=cand[j]; cand[j]=t; }
+    for(let i=cand.length-1;i>0;i--){ const j=Math.floor(this.brnd()*(i+1)); const t=cand[i]; cand[i]=cand[j]; cand[j]=t; }
     const nd=Math.min(cand.length, Math.min(this.DECOY_MAX,this.DECOY_BASE+this.stage));
     for(let k=0;k<nd;k++) addE(cand[k][0],cand[k][1]);
     this.ends=[0,L-1]; // the ONLY legal thread starts — the Hamiltonian guarantee holds from these
@@ -2820,9 +2838,9 @@ const WEAVER={
     const n=Math.min(3,1+(this.stage>=2?1:0)+(this.stage>=5?1:0));
     this.boats=[];
     for(let i=0;i<n;i++){
-      const w=110+srnd(this)*140, h=90+srnd(this)*140; // patrol box never degenerate — a tight loop would camp a knot
-      this.boats.push({ x:this.GX+srnd(this)*(this.GRID_PX-w), y:this.GY+srnd(this)*(this.GRID_PX-h),
-        w,h, t:srnd(this), dir:srnd(this)<0.5?1:-1, spd:this.BOAT_SPD+this.stage*this.BOAT_SPD_STEP });
+      const w=110+this.brnd()*140, h=90+this.brnd()*140; // patrol box never degenerate — a tight loop would camp a knot
+      this.boats.push({ x:this.GX+this.brnd()*(this.GRID_PX-w), y:this.GY+this.brnd()*(this.GRID_PX-h),
+        w,h, t:this.brnd(), dir:this.brnd()<0.5?1:-1, spd:this.BOAT_SPD+this.stage*this.BOAT_SPD_STEP });
     }
   },
   boatPos(b){ // position + heading along the patrol-box perimeter
@@ -2835,10 +2853,14 @@ const WEAVER={
     if(b.dir<0) p.a+=Math.PI;
     return p;
   },
-  spawnFlare(){ // arcs across the board top↔bottom; Nth-flare route is seeded (HOWLER Nth-draw precedent)
-    const fromTop=srnd(this)<0.5;
+  spawnFlare(){ // arcs across the board top↔bottom
+    // B1 fix (§3 determinism model): flares draw from the HAZARD stream (hrnd),
+    // NEVER the board stream. Flare count before a board completes depends on
+    // weave pace, so mixing these draws with board generation is exactly what
+    // drifted boards 2+ between players. The Nth flare's route is still shared.
+    const fromTop=this.hrnd()<0.5;
     this.flare={ t:0, dur:this.FLARE_T,
-      x0:this.GX+srnd(this)*this.GRID_PX, x1:this.GX+srnd(this)*this.GRID_PX,
+      x0:this.GX+this.hrnd()*this.GRID_PX, x1:this.GX+this.hrnd()*this.GRID_PX,
       y0:fromTop?this.GY-14:this.GY+this.GRID_PX+14,
       y1:fromTop?this.GY+this.GRID_PX+14:this.GY-14 };
   },
