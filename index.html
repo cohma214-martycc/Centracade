@@ -755,7 +755,7 @@ const HOWLER={
     this.score=0; this.best=loadBest(this.bestKey); this.newBest=false;
     this.lives=3; this.stage=0; this.throws=0; this.whistles=0;
     this.rocket=null; this.aim=null;
-    this.missFlash=0; this.hitFlash=0; this.shake=0; this.lastOutcome='';
+    this.missFlash=0; this.hitFlash=0; this.shake=0;
     this.velLog=[]; this.lastVel=0;
     this.st='ready'; this.overAt=0;
     this.placeTarget(); this.rollWind();
@@ -825,11 +825,11 @@ const HOWLER={
       const col=r.whistle?'#ffd24a':(base===100?PALS[0].glow:'#f5ece0');
       burst(this.targetX,this.TARGET_Y,col,r.whistle?16:11,3.4);
       pop((r.whistle?'WHISTLE! +':'+')+pts,this.targetX,this.TARGET_Y-16,col,r.whistle?9:7);
-      this.hitFlash=1; this.lastOutcome=base===100?'CENTRE':'RIM';
+      this.hitFlash=1;
       if(base===100) sPerfect(); else sHit();
       this.stageUp();
     } else {
-      this.lives--; this.missFlash=1; this.lastOutcome='MISS'; sBad(); buzz(40);
+      this.lives--; this.missFlash=1; sBad(); buzz(40);
       burst(r.x,fy,'#ff5566',9,3);
       pop('MISS',r.x,Math.min(fy,H-40)-12,'#ff6a8a',7);
       if(this.lives<=0){ this.gameOver(); return; }
@@ -965,9 +965,9 @@ const CHATTER={
       this.slots.push({angle:deg*Math.PI/180, active:i<2, energy:i<2?70:0, respawnT:0});
     }
     this.decayRate=this.DECAY_BASE;
-    this.stage=0; this.nextStageAt=this.STAGE_INTERVAL; this.stageT=0;
+    this.stage=0; this.stageT=0;
     this.lives=3; this.score=0;
-    this.restrikes=0; this.perfects=0; this.drops=0; this.missStreak=0;
+    this.restrikes=0; this.drops=0; this.missStreak=0;
     this.rotRot=0; this.rotSpeed=0.6;
     this.timeScale=1; this.shake=0; this.banner=null;
     this.fullChatter=false; this.chatT=0;
@@ -1013,7 +1013,7 @@ const CHATTER={
     const pos=this.slotPos(s);
     if(s.energy<=20){
       s.energy=Math.min(100,s.energy+45);
-      this.score+=8; this.perfects++;
+      this.score+=8;
       burst(pos.x,pos.y,'#ffffff',12,3.6); burst(pos.x,pos.y,this.pal().glow,8,2.8);
       pop('PERFECT SAVE!',pos.x,pos.y-24,'#ffffff',7);
       sPerfect(); buzz(18);
@@ -3089,7 +3089,6 @@ GAMES.forEach(g=>{ g.srng=null; if(!g.seed) g.seed=function(rng){ this.srng=rng|
 const DAILY_NAME='TUCK SHOP RUN';
 const DAILY_EPOCH='2026-07-16'; // day 1 = ship date; #N counts from here (local time)
 function dailyNumber(){ return Math.floor((Date.parse(dayKeyOf(new Date()))-Date.parse(DAILY_EPOCH))/86400000)+1; }
-function dailyPlayedToday(){ let st=null; try{ st=JSON.parse(localStorage.getItem('arc_daily_state')||'null'); }catch(e){} return !!(st&&st.dayKey===dayKeyOf(new Date())&&st.played); }
 
 // ════════════════════════════════════════════════════════════════
 //  GAUNTLET  (Phase 3 — every game, one score)
@@ -3197,7 +3196,8 @@ const GAUNTLET={
     else if(this.state==='end') this.drawDailyEnd();
   },
   tap(x,y){
-    if(this.state==='playing'&&cur){ cur.tap(x,y); return; }
+    // Play input never reaches here — the router forwards it through gameDown()
+    // (onDown's gauntlet branch). GAUNTLET.tap only handles non-playing chrome.
     if(this.state==='sharecard'){ this.state='end'; this.overAt=performance.now(); return; }
     if(performance.now()-this.overAt<=450) return; // debounce
     if(this.state==='interstitial'){ this.advance(); return; }
