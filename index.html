@@ -150,6 +150,33 @@ function saveBest(key,v){ try{ localStorage.setItem(key,v); }catch(e){} }
 function loadStr(key){ try{ return localStorage.getItem(key)||''; }catch(e){ return ''; } }
 function saveStr(key,v){ try{ localStorage.setItem(key,v); }catch(e){} }
 
+// ── Telemetry (arc_stats, Unit 6.0) ──────────────────────────────
+// One small JSON blob: per-game play count / total seconds / recent scores,
+// each with a daily-only sub-record, plus whole daily-run lengths. Recent
+// scores are ring buffers (≤20) so the blob stays tiny — no per-event history.
+// This is the data source for the par retune (6.5), the daily-length call, and
+// prune decisions (D26). Read it from the console: dumped on every menu entry.
+const STATS_KEY='arc_stats', STATS_CAP=20;
+function statsSeed(){ return {games:{},run:{n:0,totalSecs:0,recent:[]}}; }
+function loadStats(){ try{ return JSON.parse(localStorage.getItem(STATS_KEY)||'null')||statsSeed(); }catch(e){ return statsSeed(); } }
+function saveStats(s){ try{ localStorage.setItem(STATS_KEY,JSON.stringify(s)); }catch(e){} }
+function ringPush(arr,v){ arr.push(v); while(arr.length>STATS_CAP) arr.shift(); return arr; }
+function recordGameStat(id,score,secs,daily){
+  const s=loadStats();
+  const r=s.games[id]||(s.games[id]={n:0,totalSecs:0,recent:[],daily:{n:0,totalSecs:0,recent:[]}});
+  r.n++; r.totalSecs=+(r.totalSecs+secs).toFixed(1); ringPush(r.recent,score);
+  if(daily){ r.daily.n++; r.daily.totalSecs=+(r.daily.totalSecs+secs).toFixed(1); ringPush(r.daily.recent,score); }
+  saveStats(s);
+  console.log('[stats] '+id+(daily?' (daily)':'')+' score='+score+' secs='+secs.toFixed(1)+' n='+r.n);
+}
+function recordDailyRun(total,secs){
+  const s=loadStats(), r=s.run||(s.run={n:0,totalSecs:0,recent:[]});
+  r.n++; r.totalSecs=+(r.totalSecs+secs).toFixed(1); ringPush(r.recent,total);
+  saveStats(s);
+  console.log('[stats] DAILY RUN total='+total+' secs='+secs.toFixed(1)+' n='+r.n);
+}
+function dumpStats(){ try{ console.log('[stats] arc_stats',JSON.stringify(loadStats())); }catch(e){} }
+
 // ── Daily PRNG + dates (Phase 4) ─────────────────────────────────
 // mulberry32: tiny deterministic PRNG so a day's seed replays identically for everyone.
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
@@ -3026,6 +3053,10 @@ const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
+// Telemetry (6.0): the active game's play→over transition is detected centrally
+// in frame() so every run — free play AND daily — records exactly once. lastMode
+// gates the menu-entry arc_stats console dump.
+let telemStartAt=null, lastMode=null;
 GAMES.forEach(g=>g.init());
 // Daily content-seeding: each game accepts a seeded PRNG; srng=null ⇒ free play (Math.random).
 // Content-seeding only (spawn/zone/toss/mix) — physics & cosmetics stay live (see srnd()).
@@ -3068,6 +3099,7 @@ const GAUNTLET={
     }
     // consume the attempt now: bailing mid-run forfeits the day (true one-attempt)
     this.locked=false; this.order=GAMES; this.idx=0; this.total=0; this.results=[];
+    this.runStartAt=performance.now(); // whole-run length for telemetry (6.0)
     this.seedBase=hashStr(dk);
     saveStr('arc_daily_state',JSON.stringify({dayKey:dk,played:true}));
     this.launch();
@@ -3098,6 +3130,7 @@ const GAUNTLET={
     this.emojiGrid=this.buildEmojiGrid();
     const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:PALMAP[r.id]!=null?PALMAP[r.id]:2}));
     saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
+    if(this.runStartAt!=null){ recordDailyRun(this.total,(performance.now()-this.runStartAt)/1000); this.runStartAt=null; } // whole-run telemetry (6.0)
     refreshDaily(); sGold(); // refresh the tile's cached daily state
   },
   exit(){
@@ -3506,6 +3539,15 @@ function frame(t){
   lastT=t;
   tick++;
   updateFX();
+  // Telemetry (6.0): record each game's play→over transition once, for free play
+  // AND the daily (cur is the running game in both). 'ready'/no-cur resets the
+  // timer between runs, so a tap-to-restart re-arms cleanly.
+  if(cur){
+    if(cur.st==='play'){ if(telemStartAt==null) telemStartAt=performance.now(); }
+    else if(cur.st==='over'){ if(telemStartAt!=null){ recordGameStat(cur.id,Math.floor(cur.score||0),(performance.now()-telemStartAt)/1000,mode==='gauntlet'); telemStartAt=null; } }
+    else telemStartAt=null;
+  } else telemStartAt=null;
+  if(mode!==lastMode){ if(mode==='menu') dumpStats(); lastMode=mode; } // dump arc_stats on menu entry
   if(mode==='game'&&cur){
     if(!paused) cur.update(dt);
     cur.render();
