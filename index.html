@@ -1810,15 +1810,18 @@ const CHATTER={
 //    (1) spawn COUNT  = min(SPAWN_CAP, 1 + floor(moves/SPAWN_K)) — tiles
 //        per move grow with MOVES (inevitable, skill-proof), so free
 //        space eventually collapses no matter how well you play.
-//    (2) spawn floor-TIER rises with SCORE (TIER_BANDS) — the board
-//        clots with holo/gold that a single low merge can't clear.
+//    (2) every spawn is TIER-0 (6.2b): a tier-0 can only merge with another
+//        tier-0, so it can't be cleared into the mid/high tiles you build —
+//        the board clogs with un-mergeable clutter. (This REPLACED the old
+//        score-scaled TIER_BANDS, which gave relief and never ended a skilled
+//        run — see the SPAWN_TIER note below.)
 //  The tier-4 MEGA SLAMMER is the opposing RELIEF valve: forming one
 //  (gold+gold) detonates the low-tier CLUTTER around it (orthogonal
 //  neighbours of tier ≤ SLAM_MAXTIER) and is consumed. Clearing only
 //  clutter makes the valve self-weaken late (fewer low tiles as the
 //  board climbs), so it extends play without becoming an infinite pump —
 //  the failure mode a full-radius detonation caused in sim. Retune the
-//  run length via SPAWN_K / TIER_BANDS (a time cap is forbidden — D3),
+//  run length via SPAWN_K / SPAWN_TIER (a time cap is forbidden — D3),
 //  NOT by nerfing the merge.
 //
 //  Numbers below are SIM-DERIVED this session (no human play): a headless
@@ -1843,16 +1846,16 @@ const TAZO_COL=[ // tier → disc colours; drawn, rule 4. Unit 6.2 colour separa
   // (both cool/warm-neutral, off the blue↔cyan and amber↔gold axes), 2 holo
   // CYAN, 3 GOLD, 4 white — each reads distinct against the PALS[7] navy field.
   {face:'#333b47',edge:'#9aa7b8',glow:'#aab6c6',pip:'#dfe6f0'}, // 0 plastic — slate grey (was blue, clashed with board) // PROVISIONAL
-  {face:'#402915',edge:'#b06a34',glow:'#c88448',pip:'#ecc79c'}, // 1 cardboard — kraft brown (was amber, clashed with gold) // PROVISIONAL
+  {face:'#5a2410',edge:'#ff6a2e',glow:'#ff8a44',pip:'#ffcfa0'}, // 1 cardboard — vivid ORANGE-RED (6.2c: brown was too dim / too close to gold on the dark board) // PROVISIONAL
   {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo — cyan (kept)
-  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold (kept)
+  {face:'#6a5212',edge:'#ffe23a',glow:'#ffee84',pip:'#fff4c8'}, // 3 gold — pushed yellower to widen the gap from tier-1 orange (6.2c) // PROVISIONAL
   {face:'#8a8ad0',edge:'#ffffff',glow:'#ffffff',pip:'#ffffff'}, // 4 mega slammer (transient — detonates on formation, never rests)
 ];
 const TAZO={
   id:'tazo', name:'TAZO TYCOON', tag:'SWIPE TO STACK SLAMMERS',
   bestKey:'arc_tazo_best',
-  par:4500, // PROVISIONAL — sim-derived (greedy median ≈5257); retune with the roster (§5.6/§7)
-  ranks:[{s:0,t:'SWAPSIE ROOKIE'},{s:800,t:'LUNCHTIME TRADER'},{s:2500,t:'HOLO HOARDER'},{s:6000,t:'GOLD SLAMMER'},{s:14000,t:'TAZO TYCOON'}],
+  par:2000, // PROVISIONAL — 6.2b all-tier-0 lowers scores (sim median ≈2100, p90 ≈4300); was 4500. Retune at 6.5 with telemetry (§5.6/§7)
+  ranks:[{s:0,t:'SWAPSIE ROOKIE'},{s:400,t:'LUNCHTIME TRADER'},{s:1200,t:'HOLO HOARDER'},{s:2800,t:'GOLD SLAMMER'},{s:5000,t:'TAZO TYCOON'}], // PROVISIONAL — rescaled to the 6.2b score band (median ≈2100)
 
   // ── board geometry (360×640 logical, rule 2) ────────────────────
   N:4, GX:36, GY:198, CELL:66, GAP:6, // 4×66 + 3×6 = 282 wide, centred-ish
@@ -1861,17 +1864,24 @@ const TAZO={
   DIR_THRESH:30, // px — below this the gesture is a harmless no-op, no penalty (§8)
 
   // ── ESCALATING SPAWN PRESSURE (first-class — ALL PROVISIONAL) ────
-  SPAWN_K:6,   // spawn count steps up every SPAWN_K moves
-  SPAWN_CAP:12,// hard ceiling on tiles/move (12 floods a 16-cell board fast)
-  MAX_TIER:4,  // 4 = mega slammer (transient, detonates on formation)
+  // 6.2b difficulty fix (owner call 2026-07-20, amends D27): the DIFFICULTY now
+  // comes from ALL new spawns being TIER-0. A tier-0 tile can only ever merge
+  // with another tier-0, so as the board fills with the mid/high tiles you've
+  // built, the spawns become dead weight that can't be cleared into your
+  // progress — the board clogs and even careful play is bounded. The old
+  // score-scaled TIER_BANDS did the OPPOSITE: higher-tier spawns MERGED with
+  // your build (relief) and fed slammers, so a skilled run never ended (sim:
+  // median 3.3 min, p90 >10 min, both immovable across every sanctioned tune).
+  // All-tier-0 crushes that to ~1.3 min median / ~2.2 min p90 (sim, greedy +
+  // survival). Tune run length with SPAWN_K (raised 6→9 so length comes from the
+  // clog, not a late-game spawn flood), NOT by re-introducing higher spawn tiers
+  // (every mix tested was HARDER, not easier). A rare optimal-survival tail can
+  // still sustain a merge loop — acceptable vs the old common 10-min runs.
+  SPAWN_K:9,      // spawn count steps up every SPAWN_K moves (was 6) // PROVISIONAL
+  SPAWN_CAP:12,   // hard ceiling on tiles/move (12 floods a 16-cell board fast)
+  MAX_TIER:4,     // 4 = mega slammer (transient, detonates on formation)
   SLAM_MAXTIER:1, // detonation clears orthogonal neighbours up to this tier (clutter only)
-  // spawn floor-tier by score: rising score drops tier-0 so the board clots
-  TIER_BANDS:[
-    {s:0,   pool:[0,0,0,0,1]}, // mostly plastic
-    {s:60,  pool:[0,0,1,1,2]}, // cardboard creeps in
-    {s:180, pool:[0,1,1,2,2]}, // holo pressure
-    {s:360, pool:[1,1,2,2,3]}, // gold clutter, no more plastic
-  ],
+  SPAWN_TIER:0,   // 6.2b: every spawn is this tier — the difficulty mechanic // PROVISIONAL
   MERGE_PTS:[0,3,8,20,0], // points for MERGING INTO tier t (t=4 scored via the slam)
   SLAM_PTS:6,             // per cell a mega slammer clears (incl. itself)
   SLIDE_T:0.09, BUMP_T:0.16, // animation seconds
@@ -1881,7 +1891,7 @@ const TAZO={
   cellXY(i){ const r=Math.floor(i/this.N), c=i%this.N;
     return {x:this.GX+c*(this.CELL+this.GAP), y:this.GY+r*(this.CELL+this.GAP)}; },
   spawnCount(){ return Math.min(this.SPAWN_CAP, 1+Math.floor(this.moves/this.SPAWN_K)); },
-  tierPool(){ let b=this.TIER_BANDS[0]; this.TIER_BANDS.forEach(x=>{ if(this.score>=x.s) b=x; }); return b.pool; },
+  tierPool(){ return [this.SPAWN_TIER]; }, // 6.2b: all spawns tier-0 (the difficulty mechanic — see note above)
 
   init(){
     this.best=loadBest(this.bestKey); this.newBest=false;
@@ -3483,8 +3493,8 @@ function drawMenuIcon(g,cx,cy){
     });
   } else if(g.id==='tazo'){
     // a fanned stack of collectible tazo discs, holo on top (rule 4 — all drawn)
-    // kraft brown / gold / holo cyan — the distinct tiers post-6.2 recolour
-    [[-9,7,'#b06a34'],[0,2,'#ffd24a'],[9,-4,'#3ae8ff']].forEach((d,i)=>{
+    // orange / gold / holo cyan — the distinct tiers post-6.2c recolour
+    [[-9,7,'#ff6a2e'],[0,2,'#ffe23a'],[9,-4,'#3ae8ff']].forEach((d,i)=>{
       ctx.beginPath(); ctx.arc(d[0],d[1],14,0,Math.PI*2); ctx.fillStyle='#0a0f1e'; ctx.fill();
       if(i===2){ ctx.shadowColor='#7affff'; ctx.shadowBlur=9; }
       ctx.beginPath(); ctx.arc(d[0],d[1],12,0,Math.PI*2); ctx.fillStyle=d[2]; ctx.fill(); ctx.shadowBlur=0;
