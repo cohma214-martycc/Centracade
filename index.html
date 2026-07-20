@@ -1231,6 +1231,7 @@ const GUNGE={
     this.phase='build';           // 'build' (rotating) | 'flow' (gunge propagating)
     this.result=null; this.fillN=0; this.stopN=0; this.flowT=0;
     this.shake=0; this.banner=null; this.rejectAt=0;
+    this.gunged=0; this.pour=null;    // 6.3 contestant: coat level 0..1 + active pour anim
     this.best=loadBest(this.bestKey);
     this.newBest=false; this.st='ready'; this.overAt=0;
     parts=[]; pops=[];
@@ -1335,6 +1336,9 @@ const GUNGE={
       const d=this.dstIdx, N=this.N, cx=this.GX+(d%N)*this.cell+this.cell/2, cy=this.GY+((d/N)|0)*this.cell+this.cell/2;
       burst(cx,cy,this.pal().glow,18,4); burst(cx,cy,'#eaffcf',8,2.6);
       pop(this.gained>0?'+'+this.gained:'GUNGED!',cx,cy-20,this.pal().ring,8);
+      // 6.3: gunge pours from the dest lip down onto the contestant in the tank
+      const tk=this.tankRect(); this.gunged=1; this.pour={t:0.9, x:cx};
+      burst(W/2,tk.y+14,this.pal().glow,14,3.4); burst(W/2,tk.y+14,'#eaffcf',7,2.4);
       sGold(); buzz(20); this.shake=6;
       this.stage++; this.banner={t:'GUNGED!',life:1.3}; this.genBoard();
     } else {
@@ -1349,6 +1353,8 @@ const GUNGE={
   update(dt){
     this.shake*=0.82;
     if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+    if(this.pour){ this.pour.t-=dt; if(this.pour.t<=0) this.pour=null; } // 6.3 pour anim
+    if(this.gunged>0) this.gunged=Math.max(0,this.gunged-dt*0.42);        // 6.3 coat drips off (~2.4s)
     if(this.st!=='play') return;
     if(this.phase==='build'){
       this.timeLeft-=dt;
@@ -1360,7 +1366,10 @@ const GUNGE={
     }
   },
   // ── drawing ──
-  valveRect(){ return {x:W/2-74, y:466, w:148, h:46}; },
+  // 6.3: valve nudged down from y466 to open a band under the grid (bottom 450)
+  // for the contestant tank. Size unchanged — tap target must not shrink (§6.3).
+  valveRect(){ return {x:W/2-74, y:514, w:148, h:46}; },
+  tankRect(){ return {x:48, y:456, w:264, h:52}; }, // clear gunge tank below the grid
   drawTile(idx){
     const N=this.N, s=this.cell, col=idx%N, row=(idx/N)|0;
     const x0=this.GX+col*s, y0=this.GY+row*s, cx=x0+s/2, cy=y0+s/2;
@@ -1385,6 +1394,59 @@ const GUNGE={
     if(idx===this.srcIdx){ ctx.fillStyle=p.acc; rr(cx-9,y0-6,18,7,2); ctx.fill(); }       // valve cap above source
     if(idx===this.dstIdx){ ctx.fillStyle=p.acc; rr(cx-11,y0+s-1,22,7,2); ctx.fill(); }     // tank lip below dest
   },
+  // 6.3: the contestant seated in a clear gunge tank below the grid. On a solved
+  // release the gunge pours from the dest lip onto them (green coat + drips +
+  // resigned squint); a leak leaves them clean. Chibi reuses the SCAN/SCRAMBLE
+  // outline+fill idiom, all drawn (rule 4/9).
+  drawGungeTank(){
+    const t=this.tankRect(), p=this.pal(), cx=W/2, OUT='#0a1406';
+    const headY=t.y+16, base=t.y+t.h-6, gg=this.gunged;
+    rr(t.x,t.y,t.w,t.h,9); ctx.fillStyle='rgba(150,220,120,0.05)'; ctx.fill(); // back glass
+    // ── contestant ──
+    ctx.save(); ctx.translate(cx,0);
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0,base+3,20,4,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=OUT; ctx.lineWidth=6; ctx.lineCap='round'; // arms gripping the rim
+    ctx.beginPath(); ctx.moveTo(-13,headY+18); ctx.lineTo(-25,headY+9); ctx.moveTo(13,headY+18); ctx.lineTo(25,headY+9); ctx.stroke();
+    rr(-15,headY+9,30,26,8); ctx.fillStyle=OUT; ctx.fill();               // torso
+    rr(-13,headY+10,26,24,7); ctx.fillStyle='#2f7fa0'; ctx.fill();
+    rr(-13,headY+10,26,7,7); ctx.fillStyle='rgba(255,255,255,0.18)'; ctx.fill();
+    rr(-13,headY-12,26,26,8); ctx.fillStyle=OUT; ctx.fill();              // head
+    rr(-12,headY-11,24,24,7); ctx.fillStyle='#f4c78a'; ctx.fill();
+    rr(-12,headY-11,24,8,7); ctx.fillStyle='#3a2410'; ctx.fill();         // hair
+    const blink=(tick%210)<9, pouring=!!this.pour;
+    if(pouring||blink){ ctx.fillStyle='#111'; ctx.fillRect(-6,headY-2,5,2); ctx.fillRect(2,headY-2,5,2); }
+    else { ctx.fillStyle='#fff'; ctx.fillRect(-6,headY-4,5,5); ctx.fillRect(2,headY-4,5,5);
+           ctx.fillStyle='#111'; ctx.fillRect(-5,headY-3,3,3); ctx.fillRect(3,headY-3,3,3); }
+    ctx.strokeStyle='#7a1020'; ctx.lineWidth=1.5; ctx.beginPath();
+    if(gg>0.4) ctx.arc(0,headY+7,3.5,1.15*Math.PI,1.85*Math.PI);          // grimace while gunged
+    else { ctx.moveTo(-3,headY+6); ctx.lineTo(3,headY+6); }
+    ctx.stroke();
+    if(gg>0.04){ // green coat + drips over head & shoulders
+      ctx.save(); ctx.globalAlpha=Math.min(0.82,gg); ctx.fillStyle=p.acc;
+      rr(-13,headY-12,26,15,8); ctx.fill();
+      ctx.fillStyle=p.glow;
+      [-9,-2,6,11].forEach((dx,i)=>{ const dl=5+((tick*0.6+i*37)%9);
+        ctx.beginPath(); ctx.moveTo(dx-2,headY+2); ctx.lineTo(dx+2,headY+2); ctx.lineTo(dx,headY+2+dl); ctx.closePath(); ctx.fill(); });
+      ctx.restore();
+    }
+    ctx.restore();
+    if(gg>0.02){ // gunge pooling in the tank, rising with the coat
+      const lvl=6+(t.h-24)*Math.min(1,gg);
+      ctx.save(); ctx.globalAlpha=0.72; ctx.fillStyle=p.acc; rr(t.x+3,t.y+t.h-lvl,t.w-6,lvl,7); ctx.fill();
+      ctx.globalAlpha=0.9; ctx.fillStyle=p.glow; rr(t.x+3,t.y+t.h-lvl,t.w-6,3,2); ctx.fill(); ctx.restore();
+    }
+    if(this.pour){ // wobbling stream from the dest lip down onto the contestant
+      const sx=this.pour.x, sy=this.GY+this.GRID_PX, ey=t.y+10;
+      ctx.save(); ctx.strokeStyle=p.glow; ctx.lineWidth=6; ctx.lineCap='round';
+      ctx.shadowColor=p.glow; ctx.shadowBlur=10; ctx.globalAlpha=0.9;
+      ctx.beginPath(); ctx.moveTo(sx,sy);
+      for(let yy=sy; yy<=ey; yy+=6){ const u=(yy-sy)/(ey-sy); ctx.lineTo(sx+(cx-sx)*u+Math.sin(yy*0.25+tick*0.5)*3, yy); }
+      ctx.stroke(); ctx.restore();
+    }
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; ctx.globalAlpha=0.7; rr(t.x,t.y,t.w,t.h,9); ctx.stroke(); ctx.globalAlpha=1; // glass rim
+    rr(t.x,t.y,t.w,7,7); ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fill(); // top sheen
+    ctx.fillStyle=p.acc; rr(t.x-3,t.y-4,t.w+6,6,2); ctx.fill();             // tank lip
+  },
   render(){
     const p=this.pal();
     ctx.save();
@@ -1403,9 +1465,16 @@ const GUNGE={
     rr(bx-1,135,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
     ctx.fillStyle=frac<0.25?'#ff5a5a':(frac<0.5?'#ffd24a':p.ring);
     rr(bx,136,Math.max(0,bw*frac),6,2); ctx.fill();
+    // 6.3: surface the bank-early gamble (remaining × segments) so it's legible.
+    const fi=this.flowInfo, seg=fi?fi.segments:0, reaches=fi&&fi.reachedDest&&!fi.leaked;
+    ctx.textAlign='right'; ctx.font='5px "Press Start 2P"';
+    if(reaches&&this.phase==='build'){ ctx.fillStyle='#8aff6a'; ctx.fillText('BANK +'+(Math.max(0,Math.round(this.timeLeft))*seg),W-44,131); }
+    else { ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText(seg+' PIPES LIT',W-44,131); }
+    ctx.textAlign='center';
     // grid
     for(let idx=0;idx<this.N*this.N;idx++) this.drawTile(idx);
     drawFX();
+    this.drawGungeTank(); // 6.3 contestant in the tank, under the grid
     // RELEASE valve button (drawn, rule 4)
     const v=this.valveRect(), enabled=this.phase==='build'&&this.st==='play';
     ctx.save(); ctx.globalAlpha=enabled?1:0.4;
