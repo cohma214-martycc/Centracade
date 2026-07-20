@@ -1767,11 +1767,16 @@ const CHATTER={
 //  tiers via srnd(), so the daily replays identically. Reuses drawBG /
 //  ready+over screens / burst+pop. (Source ordered to GAMES/daily order — 6.0.)
 // ════════════════════════════════════════════════════════════════
-const TAZO_COL=[ // tier → disc colours (holo-blue family, PALS[7]); drawn, rule 4
-  {face:'#243357',edge:'#6a8cff',glow:'#6a8cff',pip:'#cdd8ff'}, // 0 plastic
-  {face:'#5a4620',edge:'#e0a84a',glow:'#ffcc66',pip:'#ffe6b0'}, // 1 cardboard
-  {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo
-  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold
+const TAZO_COL=[ // tier → disc colours; drawn, rule 4. Unit 6.2 colour separation
+  // (ALL PROVISIONAL — owner to eyeball exact hexes on-device, §7): the old
+  // ramp confused tier-0 plastic with the holo-blue board/tier-2, and tier-1
+  // cardboard with tier-3 gold (both amber). Now: 0 slate GREY, 1 kraft BROWN
+  // (both cool/warm-neutral, off the blue↔cyan and amber↔gold axes), 2 holo
+  // CYAN, 3 GOLD, 4 white — each reads distinct against the PALS[7] navy field.
+  {face:'#333b47',edge:'#9aa7b8',glow:'#aab6c6',pip:'#dfe6f0'}, // 0 plastic — slate grey (was blue, clashed with board) // PROVISIONAL
+  {face:'#402915',edge:'#b06a34',glow:'#c88448',pip:'#ecc79c'}, // 1 cardboard — kraft brown (was amber, clashed with gold) // PROVISIONAL
+  {face:'#1f5560',edge:'#3ae8ff',glow:'#7affff',pip:'#d6ffff'}, // 2 holo — cyan (kept)
+  {face:'#6a5212',edge:'#ffd24a',glow:'#ffe680',pip:'#fff4c8'}, // 3 gold (kept)
   {face:'#8a8ad0',edge:'#ffffff',glow:'#ffffff',pip:'#ffffff'}, // 4 mega slammer (transient — detonates on formation, never rests)
 ];
 const TAZO={
@@ -3409,7 +3414,8 @@ function drawMenuIcon(g,cx,cy){
     });
   } else if(g.id==='tazo'){
     // a fanned stack of collectible tazo discs, holo on top (rule 4 — all drawn)
-    [[-9,7,'#243357'],[0,2,'#e0a84a'],[9,-4,'#3ae8ff']].forEach((d,i)=>{
+    // kraft brown / gold / holo cyan — the distinct tiers post-6.2 recolour
+    [[-9,7,'#b06a34'],[0,2,'#ffd24a'],[9,-4,'#3ae8ff']].forEach((d,i)=>{
       ctx.beginPath(); ctx.arc(d[0],d[1],14,0,Math.PI*2); ctx.fillStyle='#0a0f1e'; ctx.fill();
       if(i===2){ ctx.shadowColor='#7affff'; ctx.shadowBlur=9; }
       ctx.beginPath(); ctx.arc(d[0],d[1],12,0,Math.PI*2); ctx.fillStyle=d[2]; ctx.fill(); ctx.shadowBlur=0;
