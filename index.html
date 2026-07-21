@@ -715,7 +715,8 @@ const HOWLER={
   ranks:[{s:0,t:'BACKYARD ARM'},{s:600,t:'30 METRE CLUB'},{s:1100,t:'60 METRE CLUB'},{s:1600,t:'90 METRE CLUB'},{s:2200,t:'ULTIMATE DISTANCE'},{s:3200,t:'WHISTLER'}],
 
   // ── course (metres → world px via M2PX) — all PROVISIONAL ────────
-  M2PX:6,
+  M2PX:7.5,                        // targets pushed further out (owner: the old M2PX 6
+                                   // sat them too close / needed too little power)
   TARGETS_M:[30,60,90,120],        // [3] = ULTIMATE; fixed order
   BAND_M:9, BAND_MIN_M:4.5,        // clear half-width (m); narrows 30→ULT
   CENTER_FRAC:0.35,                // inner fraction that reads as dead-centre
@@ -723,8 +724,10 @@ const HOWLER={
   // ── launch physics (true 2D parabola — NO z/depth) — PROVISIONAL ─
   GRAVITY:1400, LAUNCH_X:40, GROUND_Y:560,
   VREF:2.0,                        // swipe px/ms → power 1.0
-  SPEED_REF:1010,                  // px/s at power 1.0. CO-TUNED: whistle power (~1.0)
-                                   // at 45° reaches ULTIMATE (1010²/1400≈729 ≥ 720px) — D32.
+  SPEED_REF:865,                   // px/s at power 1.0. Lowered with the M2PX push so
+                                   // targets need FIRMER swipes (45° powers now ~0.65 →
+                                   // 1.30 across 30→ULT, up from 0.50 → 0.99). CO-TUNED so
+                                   // the whistle band still reaches ULTIMATE at 45° — D32.
   POW_MIN:0.35, POW_MAX:1.9,
   ANG_MIN:0.25, ANG_MAX:1.48,      // rad — wide enough that a near-target whistle
                                    // (high power) is reachable via a steep lob (D32).
@@ -737,7 +740,8 @@ const HOWLER={
   // amplifies angle error into big range error → risk/reward, not a freebie.
   // MEASURE ON DEVICE (flip CALIBRATE, throw ~50–100×, read the histogram).
   CALIBRATE:false,
-  WHISTLE_LO:1.85, WHISTLE_HI:2.15,// PROVISIONAL — set from the on-device pass
+  WHISTLE_LO:2.45, WHISTLE_HI:2.75,// PROVISIONAL — centred on ULT's 45° power (~1.30) after
+                                   // the M2PX/SPEED_REF retune; set from the on-device pass
 
   // ── scoring (speed-first; higher = better) — all PROVISIONAL ─────
   TIME_BUDGET:3000, TIME_RATE:40,  // budget bleeds over the run; remainder = the spine
