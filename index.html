@@ -765,7 +765,7 @@ const HOWLER={
   init(){
     this.best=loadBest(this.bestKey); this.newBest=false;
     this.throws=0; this.whistles=0; this.centerSum=0;
-    this.elapsed=0; this.started=false;
+    this.elapsed=0; this.started=false; this.timedOut=false;
     this.rocket=null; this.aim=null; this.lastLand=null;
     this.lastPowerFrac=null; this.lastWasWhistle=false;
     this.missFlash=0; this.hitFlash=0; this.shake=0;
@@ -776,13 +776,18 @@ const HOWLER={
     parts=[]; pops=[];
   },
   start(){ this.st='play'; },   // clock starts on the FIRST throw, not here
-  win(){
-    this.st='over'; this.overAt=performance.now();
+  TIME_LIMIT(){ return this.TIME_BUDGET/this.TIME_RATE; }, // s until the budget hits 0
+  // Two terminals (D30, owner-extended): a WIN (all four cleared) or the time
+  // budget running out (~75s). Budget-exhaust guarantees the daily always
+  // advances even for a player who never clears ULTIMATE — no lives, no score
+  // cap (the budget IS the score), just a graceful end. Both fire onOver once.
+  endRun(won){
+    this.st='over'; this.overAt=performance.now(); this.timedOut=!won;
     this.score=this.liveScore();
     if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.score); }
-    this.rocket=null; this.aim=null;
-    this.shake=1; sStage(); buzz(60);
-    pop('ULTIMATE!',W/2,200,'#ffd24a',12);
+    this.rocket=null; this.aim=null; this.shake=1;
+    if(won){ sStage(); buzz(60); pop('ULTIMATE!',W/2,200,'#ffd24a',12); }
+    else   { sBad(); buzz(70); pop('TIME!',W/2,200,'#ff6a8a',11); }
     if(this.onOver) this.onOver();   // one-shot, cleared by the gauntlet
   },
 
@@ -827,6 +832,9 @@ const HOWLER={
       if(r.wy>=this.GROUND_Y && r.vy>0) this.land(r);
     } else {
       this.camX+=(0-this.camX)*Math.min(1,dt*6); // snap back to the launch view
+      // Budget-exhaust terminal (checked only between throws, so an in-flight
+      // throw always resolves first — it may clear ULTIMATE at the buzzer).
+      if(this.started && this.elapsed>=this.TIME_LIMIT()){ this.endRun(false); return; }
     }
     this.score=this.liveScore();
   },
@@ -847,7 +855,7 @@ const HOWLER={
       pop((r.whistle?'WHISTLE! +':'+')+center,sx,gy-24,col,r.whistle?9:7);
       if(r.whistle) sGold(); else sPerfect();
       buzz(20);
-      if(this.active>=this.targets.length) this.win();
+      if(this.active>=this.targets.length) this.endRun(true);
     } else {
       this.missFlash=1; sBad(); buzz(30);
       burst(sx,gy-4,'#ff5566',9,3);
@@ -1000,7 +1008,8 @@ const HOWLER={
     ctx.fillText(this.score,W/2,70); ctx.shadowBlur=0;
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,88);
     const at=this.active<this.targets.length?this.targets[this.active]:null;
-    ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
+    const lowTime=this.started && this.elapsed>=this.TIME_LIMIT()*0.75; // budget nearly gone
+    ctx.font='8px "Press Start 2P"'; ctx.fillStyle=lowTime?'#ff6a8a':'#ffd24a';
     ctx.fillText(this.elapsed.toFixed(1)+'s   '+(at?(at.m>=this.TARGETS_M[this.TARGETS_M.length-1]?'ULT':at.m+'M'):'DONE')+'   '+Math.min(this.active,this.targets.length)+'/'+this.targets.length,W/2,106);
     // off-screen active-target chevron (far markers sit right of the launch view)
     if(at){ const asx=at.wx-this.camX;
@@ -1019,7 +1028,12 @@ const HOWLER={
       ctx.fillText('min '+mn.toFixed(2)+' max '+mx.toFixed(2),8,H-30);
     }
     if(this.st==='ready') drawReadyScreen(p,'HOWLER',['SWIPE TO THROW — ANGLE + POWER','CLEAR 30 · 60 · 90 · ULTIMATE, FAST','FIND THE WHISTLE — LOB THE CLOSE ONES']);
-    if(this.st==='over') drawOverScreen(p,'ULTIMATE!',this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,this.elapsed.toFixed(1)+'s · '+this.whistles+' WHISTLE'+(this.whistles===1?'':'S'));
+    if(this.st==='over'){
+      const wh=this.whistles+' WHISTLE'+(this.whistles===1?'':'S');
+      const title=this.timedOut?'TIME!':'ULTIMATE!';
+      const sub=(this.timedOut?this.active+'/'+this.targets.length+' CLEARED':this.elapsed.toFixed(1)+'s')+' · '+wh;
+      drawOverScreen(p,title,this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,sub);
+    }
   }
 };
 
