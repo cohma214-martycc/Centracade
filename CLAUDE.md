@@ -4,7 +4,7 @@ Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 
 
 **Phases 1–5 are SHIPPED.** The roster is settled at **11 games** (STACK · SCAN · HOWLER · SWINGBALL · GUNGE · CHATTER · TAZO · SCRAMBLE · DAIRY · KNUCKLEBONES · WEAVER) plus the once-a-day seeded **TUCK SHOP RUN** daily. **The base-game era is over — no new games.** Work now proceeds in this order:
 
-- **Phase 6 — REFINEMENT ⬅ IN PROGRESS.** Telemetry first, then per-game polish (HOWLER difficulty + rocket redraw, TAZO difficulty + colour separation, GUNGE contestant-in-tank), housekeeping, the roster-wide par retune, and one shipped **determinism bug fix (B1)**.
+- **Phase 6 — REFINEMENT ⬅ IN PROGRESS.** Telemetry first, then per-game polish (HOWLER redesign (2D distance course) + rocket redraw, TAZO difficulty + colour separation, GUNGE contestant-in-tank), housekeeping, the roster-wide par retune, and one shipped **determinism bug fix (B1)**.
 - **Phase 7 — SKINS.** Cosmetic era packs (default: NZ 90s/00s) over frozen mechanics. Requires a string-extraction reshaping first.
 - **Phase 8 — MUTATORS** and **Phase 9 — CREATURE**: **placeholder idea logs only. Do not build.** Append owner ideas as they arrive.
 
@@ -171,16 +171,68 @@ CHATTER is the only palette-cycling game; its cycle is the **explicit list** `CH
 - **Source restructure** ✅ SHIPPED: game object blocks reordered to match `GAMES`/daily order (STACK · SCAN · HOWLER · SWINGBALL · GUNGE · CHATTER · TAZO · SCRAMBLE · DAIRY · KNUCKLEBONES · WEAVER); `GAME N` numbers dropped from the banners (names kept); the now-false "labels track FILE order" caveats corrected. Verified move-only: the line multiset changed by exactly the seven banner edits.
 - **Copy fix** ✅ SHIPPED: the interstitial header now reads `DAILY_NAME` (was the stale `GAUNTLET`).
 
-#### 6.1 — HOWLER refinement (owner: "very hard" + sprite wrong)
+#### 6.1 — HOWLER redesign: side-on 2D distance course (owner-directed; supersedes the depth-swipe)
 
-- **Rocket redraw (no data needed).** The real Vortex/Aero Howler is a **foam football-shaped head with a long tail shaft and three swept fins** — the tail is roughly as long as the head, whistle holes sit in the head. The current sprite is a stubby rocket with base-corner fins. Redraw `drawRocket()`: ovoid purple head (`#4a1e8a→#8a4ae0` gradient, owner-locked), slim shaft, three large swept **teal** fins (`#2ad8b0`) at the rear, whistle-hole dots, cream nose highlight optional. Lives icons update free (they reuse `drawRocket`); update the `drawMenuIcon` howler branch to match. Livery stays purple/teal — that's settled.
-- **Difficulty easing (direction known, magnitude provisional).** Candidate levers, roughly in order of expected effect — pick conservatively, mark everything `// PROVISIONAL`, and let `arc_stats` + `CALIBRATE` confirm:
-  1. Raise the target floors and starts: `centerR 22→11` and `rimR 46→26` shrink fast — try `centerR()` floor ~14 and slower shrink (−1.0/stage), `rimR()` floor ~32 (−1.6/stage).
-  2. Weaken wind: `WIND_BASE 90→~55`, `WIND_STEP 45→~30`.
-  3. Consider scoring landing distance with the **vertical (power) error weighted lighter than the lateral error** — power is the hard axis of a thumb-swipe, and currently a small `vel` error moves the landing the full pole length.
-  4. Widen the whistle band only *after* the on-device `CALIBRATE` pass — a wrong-centred band widened is still a wrong band.
-- **Feedback improvement**: draw a brief landing splash/marker where the rocket actually came down relative to the target — right now a miss teaches nothing about *why*.
-- **The on-device whistle calibration pass is still owed** (`VREF`/band are synthetic).
+**Why.** The pseudo-3D depth-swipe played very hard and the "how hard, not when" idea never read clearly as *distance*. Owner call: rebuild HOWLER as a literal distance game — throw the Mega Howler left→right down a field, clear the ad's four markers in order, race the clock. The swipe verb (press/drag/release, D12) stays; everything downstream of the release changes.
+
+**Mechanic (build to this):**
+
+- **True 2D parabola — no `z`, no depth-scale, no LOFT-as-depth.** The release vector gives **both** launch angle and power. `power = clamp(vel/VREF, POW_MIN, POW_MAX)` → launch speed; swipe angle → launch angle (clamped `ANG_MIN..ANG_MAX`); integrate under `GRAVITY`. Range runs along the ground (x), loft is literal vertical arc (y).
+- **Fixed course, four targets in order: 30 · 60 · 90 · ULTIMATE** (`TARGETS_M`). One active at a time; land inside its band → clear it, arm the next. Bands **narrow down the course** (`BAND_M` at 30 → `BAND_MIN_M` at ULTIMATE). Cleared markers grey out behind you.
+- **Camera pans right** with the howler in flight, then snaps back to `LAUNCH_X` for the next throw. World is wider than 360; a marker sits at `LAUNCH_X + M2PX × distance`.
+- **Timed, no lives, no fail (2nd D14 exception — see D30).** Clock runs from the first throw to the ULTIMATE clear. A miss (outside the active band) clears nothing and just costs time — you re-throw. The **only** terminal state is ULTIMATE cleared, which is a *win* but still fires `onOver` once (gauntlet/daily read `score`/`par` unchanged).
+- **Scoring — speed-first, higher-is-better (D31).** `TIME_BUDGET` points bleed at `TIME_RATE`/s across the run; you bank the remainder (floored at 0) — fast = high. Each clear adds a small centre bonus `round(CENTER_MAX × closeness)` (0 at band edge → 1 dead-centre) — the "closer = more" layer, small next to time. Whistle stacks a final multiplier (below). Net: `score = round((timeScore + Σcenter) × (1 + WHISTLE_STEP × whistles))`.
+- **Whistle — a power band, hittable at EVERY distance (D32).** Absolute swipe-velocity band `WHISTLE_LO..WHISTLE_HI`. Because angle is free, that one fixed power reaches any target: **lob steeper for near markers, flatter (~45°) for far ones** (owner's spec). Co-tune so whistle-power max range (≈45°) ≥ ULTIMATE, and so whistle power *overshoots* near targets at moderate angles → a near-target whistle demands a steep lob (or flat skim). High power amplifies angle error into big range error, so whistle throws are **higher-variance** — a risk/reward layer, not a free upgrade. Each whistle *clear* adds `WHISTLE_STEP` (0.25) to the final multiplier; whistling all four → ×2, the WHISTLER run. Wind-immunity is retired (no wind). Keep the `CALIBRATE` velocity-histogram harness — the band **must** be measured on a real phone (a window nobody can hit is worse than none).
+- **No wind.** Delete `WIND_*`, `windStrength`, `rollWind`, `drawWind`, and the seeded-wind path. HOWLER becomes deterministic.
+- **Aim feedback:** aim **arrow** (angle) + **power meter** (strength, with the whistle band marked so the power skill is learnable) — **no landing predictor** (keeps the old "direction is honest, a landing arc over-promises" rule; with no wind the arc is deterministic, so a predictor would trivialise it). Whistle-zone marker is `// PROVISIONAL` — it teaches the power target; angle stays the skill.
+- **HUD:** drop the three life chips; add a **run timer** and a **1-of-4 progress** readout; keep score/best/rank/next-rank.
+
+**Rocket redraw (unchanged from the prior 6.1 — still needed, no data required).** The real Vortex/Aero Howler is a **foam football-shaped head with a long tail shaft and three swept fins** — tail ≈ as long as the head, whistle holes in the head. The current sprite is a stubby rocket with base-corner fins. Redraw `drawRocket()`: ovoid purple head (`#4a1e8a→#8a4ae0`, owner-locked), slim shaft, three large swept **teal** fins (`#2ad8b0`) at the rear, whistle-hole dots, optional cream nose. Life icons reused it — but lives are gone, so only the flying rocket + the `drawMenuIcon` howler branch need to match. Livery stays purple/teal (settled).
+
+**Constants (top of the HOWLER object, UPPERCASE per §9 — all `// PROVISIONAL`):**
+
+```js
+// ── course (metres → world px via M2PX) ──
+M2PX:6,
+TARGETS_M:[30,60,90,120],        // [3] = ULTIMATE_M; fixed order
+BAND_M:9, BAND_MIN_M:4.5,        // clear half-width; narrows 30→ULT
+CENTER_FRAC:0.35,                // inner fraction that reads as dead-centre
+
+// ── launch physics (true 2D parabola — NO z/depth) ──
+GRAVITY:1400, LAUNCH_X:40, GROUND_Y:560,
+VREF:2.0,                        // swipe px/ms → reference launch speed
+SPEED_REF:900,                   // px/s at power 1.0
+POW_MIN:0.35, POW_MAX:1.9,
+ANG_MIN:0.30, ANG_MAX:1.40,      // rad — allows steep lobs for near-target whistles
+
+// ── gesture gates (kept from current HOWLER) ──
+MIN_DIST:20, MAX_DT:600,         // stray/lazy swipe = free no-op (§9)
+
+// ── whistle (absolute power band; reachable at ANY distance via angle) ──
+CALIBRATE:false,                 // keep the velocity-histogram log (measures input)
+WHISTLE_LO:1.85, WHISTLE_HI:2.15,// MEASURE ON DEVICE, then set
+// co-tune: whistle-power range(≈45°) ≥ ULTIMATE, and whistle power overshoots
+// near targets at moderate angles → near whistles need a steep lob. That's the reward.
+
+// ── scoring (speed-first; higher = better) ──
+TIME_BUDGET:3000, TIME_RATE:40,  // budget bleeds over the run; remainder = the spine
+CENTER_MAX:60,                   // max centre bonus per clear (×4 targets)
+WHISTLE_STEP:0.25,               // each whistle clear +25% final; 4 → ×2 (WHISTLER)
+```
+
+**Ready-screen copy** (replace the wind line):
+`['SWIPE TO THROW — ANGLE + POWER','CLEAR 30 · 60 · 90 · ULTIMATE, FAST','FIND THE WHISTLE — LOB THE CLOSE ONES']`
+**Over-screen** stays shared; title e.g. `ULTIMATE!`, sub-line `elapsed+'s · '+whistles+' WHISTLE'`.
+
+**On-build doc updates (do these in the same commit that ships the redesign):**
+- Rewrite the **§4 HOWLER entry** to as-shipped truth (it currently documents the depth-swipe — leave it until then; code is source of truth).
+- **§3 determinism bullet:** remove `HOWLER per-resolve wind/target` from the fixed-count list — HOWLER becomes deterministic (no seeded content, like STACK).
+- **§3 pointer-stream note:** HOWLER `drag` = aim arrow + power meter (was "aim ghost only").
+- **§6.5 par table:** re-derive HOWLER `par` + rank thresholds from the *new* scoring model's telemetry (the old "500, likely down" is void — different scale).
+- Confirm `TIERS`/`TIER_HITS`, `lives`/life-chips, and all wind/depth code are gone.
+- `arc_howler_best` key is unchanged (§2). B8 (pointercancel) still applies.
+
+**Still owed:** the on-device `CALIBRATE` pass for the whistle band (`VREF`/band are synthetic until measured).
 
 #### 6.2 — TAZO refinement (owner: "easy" + colours too close) — ✅ SHIPPED (difficulty 6.2b + colours 6.2/6.2c)
 
@@ -202,7 +254,7 @@ Running list — append as observations arrive; each item stays independently sh
 
 #### 6.5 — Roster-wide par retune (needs 6.0 data)
 
-Retune **all eleven pars together** from `arc_stats`, not piecemeal — they are the exchange rate between games in the daily total. Current provisional set and known skew: STACK 20, SCAN 35, HOWLER 500 (likely **down** — game is hard), SWINGBALL 40, GUNGE 300 (**up**, ~1200 revised guess — `remaining×segments` is multiplicative and the 3× timer buff raised `remaining`), CHATTER 600, TAZO **2000 provisional** (was 4500 — 6.2b all-tier-0 difficulty fix (D28) shortened runs to ~1.3 min median / ~2.2 min p90 and lowered scores; confirm par + ranks from telemetry here), SCRAMBLE 120 (likely down), DAIRY 2200 (may need **down** — the greedy sim over-states a clock-less human game), BONES 90, WEAVER 1000. Also decide the **daily length** question here (11 games is past the 5–10 min target): accept, prune (D26), or the seeded-subset option (draw N of 11 from the day's seed, same lineup for everyone) — flagged, not built.
+Retune **all eleven pars together** from `arc_stats`, not piecemeal — they are the exchange rate between games in the daily total. Current provisional set and known skew: STACK 20, SCAN 35, HOWLER — void; the 6.1 redesign changes the scoring model entirely (speed→points, not centre/rim hits). Re-derive par + ranks from the new model's telemetry, not by adjusting 500. SWINGBALL 40, GUNGE 300 (**up**, ~1200 revised guess — `remaining×segments` is multiplicative and the 3× timer buff raised `remaining`), CHATTER 600, TAZO **2000 provisional** (was 4500 — 6.2b all-tier-0 difficulty fix (D28) shortened runs to ~1.3 min median / ~2.2 min p90 and lowered scores; confirm par + ranks from telemetry here), SCRAMBLE 120 (likely down), DAIRY 2200 (may need **down** — the greedy sim over-states a clock-less human game), BONES 90, WEAVER 1000. Also decide the **daily length** question here (11 games is past the 5–10 min target): accept, prune (D26), or the seeded-subset option (draw N of 11 from the day's seed, same lineup for everyone) — flagged, not built.
 
 ---
 
@@ -288,12 +340,19 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 | D26 | **Pruning 1–2 games over time remains on the table**, decided from `arc_stats` telemetry (play counts, run lengths, daily-length pressure) — not from vibes. CHAIN's rule-10 pattern applies to any future prune. |
 | D27 | **The sanctioned spawn LEVERS (`SPAWN_K`/`TIER_BANDS`/`SPAWN_CAP`) can't bound a skilled TAZO run** (owner call, 2026-07-20). A faithful Unit-6.2 sim proved they barely move the median and can't touch the ~12 min p90 tail (a skilled player out-clears spawn pressure). Do not re-attempt tuning those three levers for difficulty. *(Superseded on the difficulty **outcome** by D28: the fix was changing the spawn TIER, not the levers — this decision still stands as "don't bother tuning the three levers".)* |
 | D28 | **TAZO difficulty = ALL spawns are tier-0** (owner reopened + delegated, 2026-07-20). The owner's own idea, sim-confirmed where D27's levers failed: a tier-0 tile can only merge with another tier-0, so it can't be cleared into your accumulated mid/high tiles → the board clogs → even careful play is bounded (median 3.3→~1.3 min, p90 10+→~2.2 min). Shipped 6.2b: `TIER_BANDS` removed, `SPAWN_TIER=0`, `SPAWN_K 6→9`, `par 4500→2000` + ranks rescaled — all `// PROVISIONAL`, final numbers at 6.5. Tune length with `SPAWN_K`, never by re-adding higher spawn tiers (every mix tested was harder). A rare optimal-survival merge loop is accepted vs the old common 10-min runs. |
+| D29 | **HOWLER redesigned to a side-on 2D distance course** (owner-directed, Phase 6.1). Swipe = angle + power → a real parabola; range along x, loft along y; camera pans right. Retires the pseudo-3D depth-swipe and voids the old 6.1 difficulty-easing levers (the model they tuned is gone, not eased). The swipe verb (press/drag/release, D12) is kept. |
+| D30 | **HOWLER is a fixed, timed course, no lives, no fail — the 2nd owner-approved D14 exception** (after TAZO). Four targets in order (30→60→90→ULTIMATE); a miss only costs time; the sole terminal state is the ULTIMATE clear (a *win*), which still fires `onOver` and par-normalises normally. |
+| D31 | **HOWLER stays higher-is-better** — score = a bleeding time budget (fast = high) + a small per-clear centre bonus, × a whistle multiplier. **No raw stopwatch** — ranks, `par`, gauntlet, daily emoji all keep working with zero special-casing. |
+| D32 | **Whistle = an absolute swipe-power band, achievable at ALL distances** (angle chooses range: steep lob for near markers, flat for far — owner spec), not an ultimate-only lock. It's higher-variance (power amplifies angle error) → risk/reward. Each whistle clear stacks `WHISTLE_STEP` toward a ×2 all-whistle WHISTLER run. Wind is **removed** from HOWLER; the daily course is deterministic (seed content-free). |
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
 - **Daily length (11 games).** Over the 5–10 min target; TAZO and DAIRY are the run-length watch items (TAZO sim median ≈3.3 min pre-6.2; DAIRY is near-unlosable for a careful player). Decide at 6.5 with data: accept / prune (D26) / seeded subset (N of 11, same for everyone — flagged, not built).
 - **Final pars for all eleven** (6.5) — see the skew table there. All `// PROVISIONAL`.
-- **HOWLER whistle window** — on-device `CALIBRATE` pass still owed; `VREF 2.0` / band `1.85–2.15` are synthetic. Same for the 6.1 easing magnitudes.
+- **HOWLER whistle band** — on-device `CALIBRATE` pass still owed; `VREF`/band are synthetic. Now a **power band hittable at any distance** (angle-chosen range), so also confirm the co-tune (whistle range ≥ ULTIMATE; near-target whistles demand a lob). *The old "6.1 easing magnitudes" item is void — the depth-swipe model was replaced, not eased.*
+- **HOWLER scoring balance** — `TIME_BUDGET`/`TIME_RATE`/`CENTER_MAX`/`WHISTLE_STEP` split (speed vs precision vs whistle). Current draft makes speed dominant, whistling all four = ×2. Alternative under consideration: a hard "all-four-whistled" ×2 *gate* instead of the per-whistle `WHISTLE_STEP` stack. Decide from play.
+- **HOWLER whistle-zone marker** on the power meter — show it (teachable) or hide it (purer)? Owner call.
+- **HOWLER par + ranks** — re-derive at 6.5 from the redesigned model's telemetry (old `par:500` is void — different scale). Provisional new-scale guesses: `par:1800`; ranks `BACKYARD ARM 0 / 30 METRE CLUB 600 / 60 METRE CLUB 1100 / 90 METRE CLUB 1600 / ULTIMATE DISTANCE 2200 / WHISTLER 3200` — titles kept, thresholds `// PROVISIONAL`.
 - **TAZO tier hexes** — tiers recoloured to slate / orange / cyan / gold / white (6.2 + 6.2c, `// PROVISIONAL`, ΔE + screenshot-verified on the dark board); owner to confirm the final hexes on-device.
 - ~~**TAZO difficulty**~~ — RESOLVED 2026-07-20 (D28): owner reopened and shipped **all-tier-0 spawns** (6.2b). `par 2000` + ranks are `// PROVISIONAL` pending the 6.5 telemetry retune.
 - **GUNGE contestant layout** — RESOLVED (6.3): shipped the tank-below-grid option (valve nudged to y514, `GY` kept). Owner to approve the look on-device (screenshots provided in the build session).
