@@ -3524,13 +3524,13 @@ const GAUNTLET={
     const bx=44, bw=W-88, tw=10;
     results.forEach((r,i)=>{
       const y=y0+i*rowH, price='$'+(r.contrib/100).toFixed(2);
-      ctx.textAlign='left'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(r.name,bx,y-7);
-      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(price,bx+bw-tw-6,y-7);
-      rr(bx+bw-tw,y-12,tw,tw,2); ctx.fillStyle=this.tierColor(r.contrib); ctx.fill();
+      ctx.textAlign='left'; ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(r.name,bx,y-9);
+      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(price,bx+bw-tw-6,y-9);
+      rr(bx+bw-tw,y-14,tw,tw,2); ctx.fillStyle=this.tierColor(r.contrib); ctx.fill();
       rr(bx,y,bw,7,3); ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fill();
       rr(bx,y,bw*Math.max(0.02,Math.min(1,r.contrib/this.CAP)),7,3); ctx.fillStyle=r.pal.ring; ctx.fill();
-      const contentBottom=y+(withRank?20:11);
-      if(withRank){ ctx.textAlign='left'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(r.rank,bx,y+16); }
+      const contentBottom=y+(withRank?22:13);
+      if(withRank){ ctx.textAlign='left'; ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(r.rank,bx,y+17); }
       if(i<results.length-1){ // dotted rule between items, receipt-style — skipped after the last row
         ctx.save(); ctx.globalAlpha=0.22; ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.setLineDash([2,4]);
         const dy=(contentBottom+(y+rowH-7))/2;
