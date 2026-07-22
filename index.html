@@ -3517,17 +3517,26 @@ const GAUNTLET={
     ctx.restore();
   },
   // D34 on-canvas receipt line: name · $price · a drawn tier tile (rule 4 — rect, not emoji)
-  // over the progress bar, mirroring buildReceiptText()'s price/tile-per-line format.
+  // over the progress bar, with a dotted receipt-style rule between rows. Row spacing (passed
+  // in per screen below) was widened for the 6-line daily (D33, was tuned for 11) so it reads
+  // like an itemised receipt, not a cramped list.
   drawBars(results,y0,rowH,withRank){
-    const bx=44, bw=W-88, tw=8;
+    const bx=44, bw=W-88, tw=10;
     results.forEach((r,i)=>{
       const y=y0+i*rowH, price='$'+(r.contrib/100).toFixed(2);
-      ctx.textAlign='left'; ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(r.name,bx,y-4);
-      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(price,bx+bw-tw-5,y-4);
-      rr(bx+bw-tw,y-9,tw,tw,2); ctx.fillStyle=this.tierColor(r.contrib); ctx.fill();
+      ctx.textAlign='left'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(r.name,bx,y-7);
+      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(price,bx+bw-tw-6,y-7);
+      rr(bx+bw-tw,y-12,tw,tw,2); ctx.fillStyle=this.tierColor(r.contrib); ctx.fill();
       rr(bx,y,bw,7,3); ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fill();
       rr(bx,y,bw*Math.max(0.02,Math.min(1,r.contrib/this.CAP)),7,3); ctx.fillStyle=r.pal.ring; ctx.fill();
+      const contentBottom=y+(withRank?20:11);
       if(withRank){ ctx.textAlign='left'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(r.rank,bx,y+16); }
+      if(i<results.length-1){ // dotted rule between items, receipt-style — skipped after the last row
+        ctx.save(); ctx.globalAlpha=0.22; ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.setLineDash([2,4]);
+        const dy=(contentBottom+(y+rowH-7))/2;
+        ctx.beginPath(); ctx.moveTo(bx,dy); ctx.lineTo(bx+bw,dy); ctx.stroke();
+        ctx.setLineDash([]); ctx.restore();
+      }
     });
   },
   drawInterstitial(){
@@ -3540,7 +3549,7 @@ const GAUNTLET={
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillText('SCORE '+r.score+'   →   +$'+(r.contrib/100).toFixed(2),W/2,116);
     ctx.font='8px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('RUNNING TOTAL',W/2,148);
     ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,188); ctx.shadowBlur=0;
-    this.drawBars(this.results,232,30,false);
+    this.drawBars(this.results,232,48,false);
     ctx.textAlign='center';
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('NEXT  ·  '+this.order[this.idx+1].name,W/2,H-70);
     ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
@@ -3561,7 +3570,7 @@ const GAUNTLET={
     }
     ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,110); ctx.shadowBlur=0;
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+this.streak,W/2,132);
-    this.drawBars(this.results,158,30,true);
+    this.drawBars(this.results,158,58,true);
     this.drawBtn(this.copyRect(),'COPY',PALS[3]);
     this.drawBtn(this.shareRect(),'SHARE',PALS[5]);
     if(this.toast&&this.toast.life>0){ ctx.save(); ctx.globalAlpha=Math.min(1,this.toast.life); ctx.textAlign='center'; ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[3].glow; ctx.shadowBlur=8; ctx.fillText(this.toast.t,W/2,H-116); ctx.restore(); this.toast.life-=0.02; }
@@ -3578,7 +3587,7 @@ const GAUNTLET={
     ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(this.dayKey,W/2,148);
     ctx.font='32px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,196); ctx.shadowBlur=0;
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('STREAK '+this.streak,W/2,216);
-    this.drawBars(this.results,248,32,true);
+    this.drawBars(this.results,248,58,true);
     ctx.strokeStyle='rgba(255,210,74,0.45)'; ctx.lineWidth=2; rr(8,8,W-16,H-16,12); ctx.stroke();
     ctx.globalAlpha=0.6+0.4*Math.sin(tick*0.1); ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('SCREENSHOT ME  ·  TAP TO CLOSE',W/2,H-22); ctx.globalAlpha=1;
     if(this.cardCapture){ this.cardCapture=false; this.tryShareCanvas(); }
