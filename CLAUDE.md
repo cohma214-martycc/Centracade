@@ -253,6 +253,15 @@ WHISTLE_STEP:0.25,               // each whistle clear +25% final; 4 → ×2 (WH
 Running list — append as observations arrive; each item stays independently shippable:
 - SCRAMBLE: par likely down (post-R1); watch for the deferred greedy-kid-drift idea.
 - CHATTER: resolve the stage-0 hub-purple question (§7) whenever CHATTER is next touched.
+- **SCRAMBLE — harder (owner-directed, 2026-07-22): ship S1 + S2.**
+  - **S1 Arrivals** — kids walk in over time instead of the fixed 4-then-wake-to-5: start 3, a new kid arrives each stage (and mid-stage past a threshold), filling open slots → more mouths = evenness gets genuinely hard. This is the "keep coming" feel; needs a 6th+ slot or a walk-in queue (see §7 layout flag).
+  - **S2 Pressure knobs** — steeper decay ramp, shorter stages, wider `decayMul` spread. No layout change; ships independently.
+  - **Constraints:** stays endless + 3-lives (SCRAMBLE is **not** a D14 exception — the cry-at-empty loss path must remain). Interacts with "par likely down." Direction-known-harder ⇒ `// PROVISIONAL` per D24. **§3 check:** any timed/seeded arrival schedule must be identical for all daily players — use a deterministic clock or a fixed-count seeded draw (§9: every new seeded draw site is checked against the determinism model).
+- **DAIRY WARMER — redraw + harder (owner-directed, 2026-07-22): ship redraw + DD1 + DD2; DD4 parked (§7).**
+  - **Redraw (free, visual-only, no data):** draw the three shapes as real bakery items in a glass warmer — mince & cheese as a golden 2×2 with a cheese-ooze corner, sausage roll as a flaky 1×3 log, potato-top as the L with a mash crown. Warmer chrome (glass shelf, amber glow off PALS[8], price tags, condensation); "sell" = the pie slides out to a customer rather than the row just vanishing.
+  - **DD1 Tighter shelf** — drop to 5 columns (or add awkward dead corners). Cleanest lever, near-zero risk.
+  - **DD2 Nastier piece set** — add S/Z/T-ish clusters + more orientations (orientations still derived+deduped in `init()`).
+  - **Constraints:** stays inside D18 (tray-of-3, `trayDead` loss, strike wipes, 3 strikes = over) and D13 (tap-only). DAIRY par may go **down** at 6.5 (greedy sim overstates a human) — "harder" and par move together. Direction-known ⇒ `// PROVISIONAL` per D24. **§3 check:** narrowing columns / adding piece types must keep `dealTray` fixed-count per placement (variety up, draw count unchanged) so daily trays stay identical for all players.
 - *(empty slots — this is the refinement idea log)*
 
 #### 6.5 — Roster-wide par retune (needs 6.0 data)
@@ -347,10 +356,12 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 | D30 | **HOWLER is a fixed, timed course, no lives — the 2nd owner-approved D14 exception** (after TAZO). Four targets in order (30→60→90→ULTIMATE); a miss only costs time. **Two terminals** (owner-extended at build, 2026-07-21): the ULTIMATE clear (a *win*), or the **time budget running out (~75s)** — a graceful budget-exhaust end, not a fail and not a score cap (the bleeding budget *is* the score; it ends banking whatever centre bonus was earned). Budget-exhaust guarantees the daily always advances even for a player who never clears ULTIMATE. Both fire `onOver` once and par-normalise normally; an in-flight throw at the buzzer resolves first (can still win). |
 | D31 | **HOWLER stays higher-is-better** — score = a bleeding time budget (fast = high) + a small per-clear centre bonus, × a whistle multiplier. **No raw stopwatch** — ranks, `par`, gauntlet, daily emoji all keep working with zero special-casing. |
 | D32 | **Whistle = an absolute swipe-power band, achievable at ALL distances** (angle chooses range: steep lob for near markers, flat for far — owner spec), not an ultimate-only lock. It's higher-variance (power amplifies angle error) → risk/reward. Each whistle clear stacks `WHISTLE_STEP` toward a ×2 all-whistle WHISTLER run. Wind is **removed** from HOWLER; the daily course is deterministic (seed content-free). |
+| D33 | **The daily draws 6 of 11, not all 11 (owner-directed, 2026-07-22).** Resolves the §7 daily-length flag via the sanctioned "seeded subset" option (not a prune, not accept). Selection is a **deterministic bag**: shuffle all 11 from a day-seeded PRNG (`mulberry32(hashStr(dayKey))`), deal 6, **constraint: at most one of {TAZO, DAIRY} per day** (the two run-length watch items) so the run holds ~5–8 min; refill+reshuffle the bag when it drains so every game surfaces on a regular cadence. Same 6, same order, for everyone that day (rule 12 / D22 — selection is part of "the daily sequence," theme-invariant; seed from `dayKey` only, never from `arc_theme`). Contained change: the controller already sequences `this.order`, so this is "set `this.order` to the 6-pick" — `idx`, interstitial `/6`, finish check, and the par-normalised total all follow. Count is a constant `DAILY_PICK=6` for later retune. Orthogonal to pruning (D26): subset-of-N and prune-the-pool compose. A game's `idx`-derived seed now varies day to day → more board variety, no determinism cost. |
+| D34 | **The daily share is a tuck-shop receipt with prices (owner-directed, 2026-07-22).** Refines D8's emoji grid (still card + text, no backend — not a reopen). Each of the day's 6 games is a receipt line: `<shareIcon> <shareLabel> <price> <tile>`, where **price = contrib ÷ 100** formatted `$X.XX` and the tile is the existing contrib tier. Prices sum to the run total like a real till; price bands and tile bands align automatically (both from the same contrib, so a line can never look self-contradictory). `shareLabel`/`shareIcon` are **skinnable display strings** (Phase 7.0 pack fields; inline under `nz90` until extraction) — a future era pack remaps the snacks; tiles/prices/total stay comparable (D22). Lineup + labels are shared for the day; prices + tiles are the personal result (the Wordle contract). **Rule 4:** emoji live only in the **copied/shared text**; the on-canvas receipt draws its own tiles + text (like the current end-screen chips). **Impl note:** add game `id` (or the resolved label) to each stored `arc_daily_state.result` row so the receipt rebuilds on a locked/returning day (today's stored row keeps `name`/`contrib`/`rank`/`pid`, no `id`). Nostalgia labels owner-cleared per D15 (proposed set below). |
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
-- **Daily length (11 games).** Over the 5–10 min target; TAZO and DAIRY are the run-length watch items (TAZO sim median ≈3.3 min pre-6.2; DAIRY is near-unlosable for a careful player). Decide at 6.5 with data: accept / prune (D26) / seeded subset (N of 11, same for everyone — flagged, not built).
+- ~~**Daily length (11 games).**~~ — RESOLVED 2026-07-22 (D33): the daily now draws **6 of 11** via a day-seeded bag (at most one of TAZO/DAIRY per day). `DAILY_PICK=6` is tunable at 6.5 from telemetry.
 - **Final pars for all eleven** (6.5) — see the skew table there. All `// PROVISIONAL`.
 - ~~**HOWLER daily-termination guarantee**~~ — RESOLVED 2026-07-21 (owner said build it): shipped the **budget-exhaustion terminal** — when the time budget hits 0 (~75s) without an ULTIMATE clear, the run ends gracefully (score = banked centre bonus × whistle mult) and fires `onOver`, so the daily always advances. D30 updated to two terminals. Verified headless (budget-exhaust ends + fires once + floored score; in-flight-at-buzzer throw still resolves/wins).
 - **HOWLER whistle band** — on-device `CALIBRATE` pass still owed; `VREF`/band are synthetic. Now a **power band hittable at any distance** (angle-chosen range); after the owner retune the co-tune is `M2PX 7.5` + `SPEED_REF 865` + band `2.45–2.75` + `ANG 0.25–1.48` (whistle@45° ≈ 120 M ≥ ULTIMATE; 30M whistle needs a ~79–85° lob) — reconfirm on device. *The old "6.1 easing magnitudes" item is void — the depth-swipe model was replaced, not eased.*
@@ -364,7 +375,44 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 - **First alternate skin era** — 80s or 10s, and the per-game references (Phase 7.2 idea log).
 - **Which games get pruned**, if any, and the target roster size (D26; after 6.0/6.5 data).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
-- **Emoji-grid comparability** — the grid length tracks the roster (11 tiles now); shares aren't comparable across a roster change. Accepted; noted in the share code.
+- **Share comparability (D33/D34).** The receipt is 6 lines, and the lineup changes daily, so **cross-day** shares aren't tile-comparable — this is now **by design** (each day is its own puzzle). **Same-day** shares stay perfectly comparable (everyone gets the same 6 games + labels). Noted in the share code.
+- **DAIRY strike-relief (DD4) — PARKED, owner call (reopens D18).** The strike-wipes-the-whole-shelf-and-refreshes rule is *why* DAIRY is near-unlosable — it's the highest-leverage difficulty lever. Options if reopened: wipe only the bottom row / make the wipe cost banked points / 2 strikes instead of 3. **Not built** — D18 fixes "strike wipes shelf + fresh tray, 3 strikes = over," so this needs an explicit owner reopen before anyone touches it.
+- **SCRAMBLE "arrivals" layout (S1).** More kids than the current 5 slots needs a 6th+ slot or a walk-in queue that pushes one off — a layout change to design before build. (Decided direction; logged in 6.4.)
+- **`shareLabel`/`shareIcon` per game (D34).** Proposed `nz90` set below; owner clears each snack reference (D15) before it ships.
+
+**Receipt share — spec detail (for the D34 build unit).**
+
+Line format (shared/copied text):
+```
+🧾 TUCK SHOP RUN #<N>
+· · · · · · · · · · · ·
+<icon> <label>   $<price>  <tile>
+... (6 lines) ...
+· · · · · · · · · · · ·
+   TOTAL        $<total>  🔥<streak>
+```
+- `price = (contrib / 100).toFixed(2)`; `total = (this.total / 100).toFixed(2)` (== Σ line prices).
+- `tile` = existing tier map: `<100 ⬛ · <200 🟨 · <350 🟧 · <500 🟩 · ≥500 🟪` (price bands align: ⬛ <$1.00 … 🟪 ≥$5.00).
+- Dot-leaders keep columns aligned when pasted into a chat.
+- On-canvas receipt (end/share screen): draw tiles as filled rects + text (rule 4 — no emoji glyphs on canvas). Emoji version is the copyable `shareText()` only.
+
+Proposed `nz90` mapping (owner clears each per D15; emoji are the text-share icons):
+
+| game | shareIcon | shareLabel | alt |
+| --- | --- | --- | --- |
+| STACK | 🥪 | club sammie | |
+| SCAN | 🛒 | checkout | |
+| HOWLER | 🏈 | mega howler | 📼 |
+| SWINGBALL | 🎾 | swingball | |
+| GUNGE | 🫗 | gunge tank | 🟢 |
+| CHATTER | 💬 | chatter ring | 📞 |
+| TAZO | 🎟 | tazo pack | 💿 |
+| SCRAMBLE | 🍬 | lolly scramble | |
+| DAIRY | 🥧 | mince pie | |
+| KNUCKLEBONES | 🎲 | knucklebones | |
+| WEAVER | 🧶 | jersey knit | |
+
+These slot into the Phase 7.0 pack as `games.<id>.shareLabel` / `shareIcon`; inline under `nz90` until 7.0 extraction.
 
 ## 8. Known bugs & tech debt (ledger — fix in the unit named)
 
