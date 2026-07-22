@@ -3452,6 +3452,8 @@ const GAUNTLET={
   // $price = contrib÷100, tile). Price/tile bands derive from the same contrib, so a line can
   // never look self-contradictory, and line prices always sum to the printed total (a real till).
   tierTile(c){ return c<100?'⬛':c<200?'🟨':c<350?'🟧':c<500?'🟩':'🟪'; },
+  // canvas counterpart of tierTile — a drawn swatch, never an emoji glyph (rule 4). Same bands.
+  tierColor(c){ return c<100?'#3a3a42':c<200?'#ffd24a':c<350?'#ff9a3a':c<500?'#5fe89a':'#c89aff'; },
   buildReceiptText(){
     const LW=15, pad=(s,n)=>{ s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); };
     const dots='· · · · · · · · · · · ·';
@@ -3511,15 +3513,18 @@ const GAUNTLET={
   drawStrip(){
     ctx.save(); ctx.textAlign='center';
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)';
-    ctx.fillText(DAILY_NAME+' '+(this.idx+1)+'/'+this.order.length+'  ·  '+this.total,W/2,30);
+    ctx.fillText(DAILY_NAME+' '+(this.idx+1)+'/'+this.order.length+'  ·  $'+(this.total/100).toFixed(2),W/2,30);
     ctx.restore();
   },
+  // D34 on-canvas receipt line: name · $price · a drawn tier tile (rule 4 — rect, not emoji)
+  // over the progress bar, mirroring buildReceiptText()'s price/tile-per-line format.
   drawBars(results,y0,rowH,withRank){
-    const bx=44, bw=W-88;
+    const bx=44, bw=W-88, tw=8;
     results.forEach((r,i)=>{
-      const y=y0+i*rowH;
+      const y=y0+i*rowH, price='$'+(r.contrib/100).toFixed(2);
       ctx.textAlign='left'; ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText(r.name,bx,y-4);
-      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(''+r.contrib,bx+bw,y-4);
+      ctx.textAlign='right'; ctx.fillStyle=r.pal.ring; ctx.fillText(price,bx+bw-tw-5,y-4);
+      rr(bx+bw-tw,y-9,tw,tw,2); ctx.fillStyle=this.tierColor(r.contrib); ctx.fill();
       rr(bx,y,bw,7,3); ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fill();
       rr(bx,y,bw*Math.max(0.02,Math.min(1,r.contrib/this.CAP)),7,3); ctx.fillStyle=r.pal.ring; ctx.fill();
       if(withRank){ ctx.textAlign='left'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(r.rank,bx,y+16); }
@@ -3532,9 +3537,9 @@ const GAUNTLET={
     ctx.font='8px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText(DAILY_NAME,W/2,58);
     ctx.font='14px "Press Start 2P"'; ctx.fillStyle=r.pal.ring; ctx.shadowColor=r.pal.glow; ctx.shadowBlur=12;
     ctx.fillText(r.name,W/2,94); ctx.shadowBlur=0;
-    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillText('SCORE '+r.score+'   →   +'+r.contrib,W/2,116);
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillText('SCORE '+r.score+'   →   +$'+(r.contrib/100).toFixed(2),W/2,116);
     ctx.font='8px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('RUNNING TOTAL',W/2,148);
-    ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(this.total,W/2,188); ctx.shadowBlur=0;
+    ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,188); ctx.shadowBlur=0;
     this.drawBars(this.results,232,30,false);
     ctx.textAlign='center';
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('NEXT  ·  '+this.order[this.idx+1].name,W/2,H-70);
@@ -3554,7 +3559,7 @@ const GAUNTLET={
       ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP FOR MENU',W/2,H-40); ctx.globalAlpha=1;
       return;
     }
-    ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(this.total,W/2,110); ctx.shadowBlur=0;
+    ctx.font='30px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,110); ctx.shadowBlur=0;
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+this.streak,W/2,132);
     this.drawBars(this.results,158,30,true);
     this.drawBtn(this.copyRect(),'COPY',PALS[3]);
@@ -3571,7 +3576,7 @@ const GAUNTLET={
     ctx.textAlign='center';
     ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=10; ctx.fillText(DAILY_NAME+' #'+this.dailyN,W/2,130); ctx.shadowBlur=0;
     ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText(this.dayKey,W/2,148);
-    ctx.font='32px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=16; ctx.fillText(this.total,W/2,196); ctx.shadowBlur=0;
+    ctx.font='32px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[2].glow; ctx.shadowBlur=16; ctx.fillText('$'+(this.total/100).toFixed(2),W/2,196); ctx.shadowBlur=0;
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('STREAK '+this.streak,W/2,216);
     this.drawBars(this.results,248,32,true);
     ctx.strokeStyle='rgba(255,210,74,0.45)'; ctx.lineWidth=2; rr(8,8,W-16,H-16,12); ctx.stroke();
@@ -3775,7 +3780,7 @@ function drawDailyTile(){
     ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.fillText('COME BACK TOMORROW',cx,r.y+262);
   } else if(dailyCache.played){
     ctx.font='9px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillText('TODAY',cx,r.y+224);
-    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=12; ctx.fillText(dailyCache.total,cx,r.y+256); ctx.shadowBlur=0;
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=PALS[5].glow; ctx.shadowBlur=12; ctx.fillText('$'+(dailyCache.total/100).toFixed(2),cx,r.y+256); ctx.shadowBlur=0;
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.fillText('STREAK '+dailyCache.streak,cx,r.y+278);
     ctx.globalAlpha=0.55+0.45*Math.sin(tick*0.09);
     ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.fillText('► TAP TO VIEW RESULT',cx,r.y+r.h-26); ctx.globalAlpha=1;
