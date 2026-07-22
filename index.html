@@ -2190,7 +2190,10 @@ const SCRAMBLE={
   par:120, // PROVISIONAL — likely needs lowering after R1; retune from play data
   ranks:[{s:0,t:'FIRST TOSS'},{s:40,t:'LOLLY LOBBER'},{s:100,t:'GALA DAY REGULAR'},{s:200,t:'CROWD PLEASER'},{s:350,t:'FAIR SHARE HERO'},{s:550,t:'PARTY LEGEND'},{s:800,t:'SCRAMBLE SAINT'}],
   KID_Y:532, THROW_X:W/2, THROW_Y:172, MAX_KIDS:5,
-  DECAY_BASE:6.5, DECAY_GROWTH:1.9, STAGE_INTERVAL:10,
+  // S2 pressure knobs (owner-directed, 2026-07-22, D24 direction-known-harder — PROVISIONAL,
+  // tune with par at 6.5): steeper decay ramp (was 1.9), shorter stages (was 10s). No layout
+  // change — S1 (arrivals) is a separate, still-open unit pending the slot-model decision (§7).
+  DECAY_BASE:6.5, DECAY_GROWTH:2.8, STAGE_INTERVAL:7,
   THROW_GAIN:34, SCORE_RATE:5.0,
   FAIR_FLOOR:60, FAIR_BAND:20,
   CRY_TIME:1.4, PITY:42,
@@ -2199,7 +2202,7 @@ const SCRAMBLE={
     const cols=['#ff6a8a','#4aa3ff','#ffd24a','#5fe89a','#c89aff'];
     this.kids=xs.map((x,i)=>({
       x, i, active:i<4, haul:i<4?70:0, // R1: start 4 active (indices 0–3)
-      decayMul:0.8+srnd(this)*0.6, away:0, bob:Math.random()*Math.PI*2,
+      decayMul:0.7+srnd(this)*0.9, away:0, bob:Math.random()*Math.PI*2, // S2: wider spread (was 0.8–1.4) — PROVISIONAL
       color:cols[i], happy:0,
     }));
     this.lollies=[];
@@ -2441,9 +2444,13 @@ const SCRAMBLE={
 //  (held preview + rotation), tap the drawn ROTATE button to cycle its
 //  orientation, tap a shelf cell to PLACE it. NO drag, NO press() — so
 //  per D12/§3 the router leaves it on tap()-on-pointerdown, exactly like
-//  GUNGE. Blockdoku-style: place trominoes/tetromino anywhere on the 6×4
-//  shelf, a FULL HORIZONTAL ROW sells (clears) with a neon FRESH! flash,
-//  no gravity. Multi-row clears score exponentially (double-decker order).
+//  GUNGE. Blockdoku-style: place trominoes/tetrominoes anywhere on the 5×4
+//  shelf (DD1, was 6×4), a FULL HORIZONTAL ROW sells (clears) with a neon
+//  FRESH! flash, no gravity. Multi-row clears score exponentially
+//  (double-decker order). Redraw (2026-07-22): pieces read as real bakery
+//  items (mince & cheese, sausage roll, potato-top, + DD2's custard square
+//  and cheese roll) in a glass warmer with amber glow/condensation chrome;
+//  a sold row slides off to a customer instead of silently vanishing.
 //
 //  Tray of 3, place in ANY ORDER (reading B, owner-approved 2026-07-18):
 //  §5.4's "tap a queued pastry to select" reads as free choice, which
@@ -2475,14 +2482,23 @@ const DAIRY={
   // come DOWN after data, unlike the usual "too low" story. Retune with the roster (§7).
   par:2200, // PROVISIONAL
   ranks:[{s:0,t:'AFTER-SCHOOL REGULAR'},{s:400,t:'COUNTER HAND'},{s:1000,t:'WARMER WRANGLER'},{s:2000,t:'PIE ARCHITECT'},{s:3500,t:'DAIRY OWNER'}], // PROVISIONAL
-  COLS:6, ROWS:4, CELL:50, GX:30, GY:140,   // 6×4 glass shelf, 300×200 box
+  // DD1 (owner-directed, 2026-07-22, D24 direction-known-harder — PROVISIONAL): shelf tightened
+  // 6 cols → 5 (was 300×200, now 250×200). GX is computed in init() from COLS/CELL so the shelf
+  // stays centred off the column count — never hardcode a width/centring number here again.
+  COLS:5, ROWS:4, CELL:50, GY:140,
   BASE_CLEAR:60,                             // per-row clear base — score += BASE×(2^rows − 1) (PROVISIONAL)
   // Pastries as origin-relative [col,row] cells; orientations derived + deduped in init().
+  // DD2 (owner-directed, 2026-07-22, D24 — PROVISIONAL) added CUSTARD SQUARE (S) + CHEESE ROLL
+  // (T): nastier clusters, more orientations. §3: dealTray() still draws exactly one seeded index
+  // per tray slot regardless of SHAPES.length, so daily trays stay fixed-count/deterministic —
+  // only the value range widened, not the draw count.
   SHAPES:[
-    {name:'MINCE & CHEESE', col:'#e0a84a', cells:[[0,0],[1,0],[0,1],[1,1]]}, // 2×2 — 1 orientation
-    {name:'SAUSAGE ROLL',   col:'#d69a52', cells:[[0,0],[1,0],[2,0]]},       // 1×3 — 2 orientations
-    {name:'POTATO-TOP',     col:'#c07838', cells:[[0,0],[0,1],[1,1]]},       // L-tromino — 4 orientations
-  ],
+    {name:'MINCE & CHEESE', col:'#e0a84a', tag:'$4.50', cells:[[0,0],[1,0],[0,1],[1,1]]}, // 2×2 — 1 orientation
+    {name:'SAUSAGE ROLL',   col:'#d69a52', tag:'$3.80', cells:[[0,0],[1,0],[2,0]]},       // 1×3 — 2 orientations
+    {name:'POTATO-TOP',     col:'#c07838', tag:'$3.20', cells:[[0,0],[0,1],[1,1]]},       // L-tromino — 4 orientations
+    {name:'CUSTARD SQUARE', col:'#f2e6a0', tag:'$3.50', cells:[[1,0],[2,0],[0,1],[1,1]]}, // S-tetromino — DD2
+    {name:'CHEESE ROLL',    col:'#e8c468', tag:'$2.80', cells:[[0,0],[1,0],[2,0],[1,1]]}, // T-tetromino — DD2
+  ], // tag = decorative warmer price tag only (cosmetic — no scoring link, D34's receipt price is separate)
   pal(){ return PALS[8]; }, // warm caramel (hues PROVISIONAL, §3/§7)
   // ── orientation maths (built once per init) ──
   buildOris(){
@@ -2497,10 +2513,12 @@ const DAIRY={
   },
   init(){
     this.buildOris();
-    this.grid=new Array(this.COLS*this.ROWS).fill(null); // null = empty, else pastry colour
+    this.GX=(W-this.COLS*this.CELL)/2; // DD1: centred off COLS/CELL, never a hardcoded width
+    this.grid=new Array(this.COLS*this.ROWS).fill(null); // null = empty, else {col,shape}
     this.tray=[]; this.sel=-1; this.rot=0;
     this.lives=3; this.score=0; this.served=0; this.rowsCleared=0;
     this.shake=0; this.banner=null; this.rejectAt=0; this.reject=null; // reject={cells,col,row}
+    this.slides=[]; // sold pastries sliding off the shelf to a customer (redraw, cosmetic)
     this.best=loadBest(this.bestKey); this.newBest=false;
     this.st='ready'; this.overAt=0;
     parts=[]; pops=[];
@@ -2529,7 +2547,7 @@ const DAIRY={
       this.reject={cells:ori,col,row}; this.rejectAt=performance.now(); sBad(); return;
     }
     const s=this.SHAPES[shapeIdx];
-    for(const [dc,dr] of ori){ const c=col+dc, r=row+dr; this.grid[r*this.COLS+c]=s.col;
+    for(const [dc,dr] of ori){ const c=col+dc, r=row+dr; this.grid[r*this.COLS+c]={col:s.col,shape:shapeIdx};
       const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2; burst(cx,cy,s.col,4,1.8); }
     this.served++; sHit(); buzz(8);
     this.tray.splice(this.sel,1); this.sel=-1; this.rot=0; this.reject=null;
@@ -2542,7 +2560,10 @@ const DAIRY={
     for(let r=0;r<this.ROWS;r++){ let f=true; for(let c=0;c<this.COLS;c++) if(this.grid[r*this.COLS+c]===null){ f=false; break; } if(f) full.push(r); }
     const n=full.length; if(!n) return;
     const p=this.pal();
-    for(const r of full){ for(let c=0;c<this.COLS;c++){ const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2;
+    for(const r of full){
+      const rowCol=(this.grid[r*this.COLS]&&this.grid[r*this.COLS].col)||p.acc;
+      this.slides.push({x:this.GX-8,y:this.GY+r*this.CELL+this.CELL/2,col:rowCol,vx:360,a:1}); // pie slides out to a customer
+      for(let c=0;c<this.COLS;c++){ const cx=this.GX+c*this.CELL+this.CELL/2, cy=this.GY+r*this.CELL+this.CELL/2;
       burst(cx,cy,p.glow,6,3); this.grid[r*this.COLS+c]=null; } }
     this.rowsCleared+=n;
     const gained=this.BASE_CLEAR*(Math.pow(2,n)-1); // exponential — double-decker order
@@ -2565,6 +2586,7 @@ const DAIRY={
   update(dt){
     this.shake*=0.82;
     if(this.banner){ this.banner.life-=dt*0.7; if(this.banner.life<=0) this.banner=null; }
+    for(let i=this.slides.length-1;i>=0;i--){ const s=this.slides[i]; s.x+=s.vx*dt; s.a-=dt*1.1; if(s.a<=0||s.x>W+20) this.slides.splice(i,1); }
   },
   // ── layout ──
   rotRect(){ return {x:W-104, y:462, w:92, h:44}; },
@@ -2576,6 +2598,28 @@ const DAIRY={
     const w=(xc-mc+1)*cell, h=(xr-mr+1)*cell, ox=cx-w/2-mc*cell, oy=cy-h/2-mr*cell;
     ctx.save(); ctx.globalAlpha=alpha==null?1:alpha;
     for(const [c,r] of cells){ const x=ox+c*cell, y=oy+r*cell; rr(x+1,y+1,cell-2,cell-2,4); ctx.fillStyle=col; ctx.fill(); }
+    ctx.restore();
+  },
+  // per-shape bakery texture on a placed cell (redraw, cosmetic — shape index only, no data change)
+  drawPastryDetail(shapeIdx,x0,y0,cell){
+    ctx.save(); rr(x0+2,y0+2,cell-4,cell-4,7); ctx.clip();
+    if(shapeIdx===0){ // mince & cheese — cheese-ooze corner
+      ctx.fillStyle='#ffe9a8'; ctx.beginPath(); ctx.moveTo(x0+cell-4,y0+cell-4);
+      ctx.quadraticCurveTo(x0+cell-18,y0+cell-6,x0+cell-6,y0+cell-18); ctx.closePath(); ctx.fill();
+    } else if(shapeIdx===1){ // sausage roll — flaky diagonal hatch
+      ctx.strokeStyle='rgba(255,235,200,0.32)'; ctx.lineWidth=1.5;
+      for(let i=-cell;i<cell*2;i+=8){ ctx.beginPath(); ctx.moveTo(x0+i,y0+cell); ctx.lineTo(x0+i+cell,y0); ctx.stroke(); }
+    } else if(shapeIdx===2){ // potato-top — mash crown scallop along the top edge
+      ctx.fillStyle='#f0e0c0'; ctx.beginPath(); ctx.moveTo(x0+4,y0+7);
+      for(let i=0;i<3;i++){ const cx0=x0+4+i*((cell-8)/3), cx1=cx0+(cell-8)/3; ctx.quadraticCurveTo(cx0+((cell-8)/6),y0-3,cx1,y0+7); }
+      ctx.lineTo(x0+cell-4,y0+7); ctx.closePath(); ctx.fill();
+    } else if(shapeIdx===3){ // custard square (DD2) — icing speckle dust
+      ctx.fillStyle='rgba(255,255,255,0.55)';
+      [[0.3,0.3],[0.62,0.5],[0.42,0.72],[0.72,0.28]].forEach(([fx,fy])=>{ ctx.beginPath(); ctx.arc(x0+fx*cell,y0+fy*cell,1.4,0,7); ctx.fill(); });
+    } else { // cheese roll (DD2) — rolled swirl lines
+      ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.3;
+      for(let rad=4;rad<cell*0.7;rad+=6){ ctx.beginPath(); ctx.arc(x0+cell/2,y0+cell/2,rad,0.3,Math.PI*1.6); ctx.stroke(); }
+    }
     ctx.restore();
   },
   render(){
@@ -2590,17 +2634,29 @@ const DAIRY={
     ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
     for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
       ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
-    // shelf
-    const CELL=this.CELL;
+    // shelf — warm ambient glow behind the glass (warmer chrome, cosmetic redraw)
+    const CELL=this.CELL, gcx=this.GX+this.COLS*CELL/2, gcy=this.GY+this.ROWS*CELL/2;
+    const gg=ctx.createRadialGradient(gcx,gcy,10,gcx,gcy,this.COLS*CELL*0.7);
+    gg.addColorStop(0,p.acc+'26'); gg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.save(); ctx.fillStyle=gg; ctx.fillRect(this.GX-16,this.GY-16,this.COLS*CELL+32,this.ROWS*CELL+32); ctx.restore();
     for(let r=0;r<this.ROWS;r++) for(let c=0;c<this.COLS;c++){
       const x0=this.GX+c*CELL, y0=this.GY+r*CELL, v=this.grid[r*this.COLS+c];
-      rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.fillStyle=v?v:'#1a1206'; ctx.fill();
+      rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.fillStyle=v?v.col:'#1a1206'; ctx.fill();
       ctx.strokeStyle=v?'rgba(255,255,255,0.18)':'rgba(255,255,255,0.06)'; ctx.lineWidth=1; rr(x0+2,y0+2,CELL-4,CELL-4,7); ctx.stroke();
-      if(v){ ctx.fillStyle='rgba(255,255,255,0.14)'; rr(x0+6,y0+6,CELL-12,6,3); ctx.fill(); } // glass sheen
+      if(v){ this.drawPastryDetail(v.shape,x0,y0,CELL); ctx.fillStyle='rgba(255,255,255,0.14)'; rr(x0+6,y0+6,CELL-12,6,3); ctx.fill(); } // glass sheen
     }
-    // glass shelf edges
+    // glass shelf edges + condensation streaks (warmer chrome, cosmetic)
     ctx.strokeStyle=p.acc+'88'; ctx.lineWidth=2;
     for(let r=0;r<=this.ROWS;r++){ const y=this.GY+r*CELL; ctx.beginPath(); ctx.moveTo(this.GX-4,y); ctx.lineTo(this.GX+this.COLS*CELL+4,y); ctx.stroke(); }
+    ctx.save(); ctx.globalAlpha=0.10; ctx.strokeStyle='#dff6ff'; ctx.lineWidth=1.5;
+    [0.14,0.42,0.7,0.9].forEach((f,i)=>{ const x=this.GX+f*this.COLS*CELL, wob=Math.sin(tick*0.02+i)*3;
+      ctx.beginPath(); ctx.moveTo(x+wob,this.GY-2); ctx.lineTo(x-wob,this.GY+this.ROWS*CELL+2); ctx.stroke(); });
+    ctx.restore();
+    // sold pastries sliding off the shelf to a customer (redraw — "sell" is no longer a silent vanish)
+    this.slides.forEach(s=>{ ctx.save(); ctx.globalAlpha=Math.max(0,s.a);
+      rr(s.x-11,s.y-9,22,18,5); ctx.fillStyle=s.col; ctx.fill();
+      ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.textAlign='center'; ctx.fillText('$',s.x,s.y+22);
+      ctx.restore(); });
     // reject ghost (soft misfit, §8)
     if(this.reject&&performance.now()-this.rejectAt<220){
       const g=this.reject;
@@ -2616,7 +2672,8 @@ const DAIRY={
       ctx.strokeStyle=on?p.glow:p.ring+'66'; ctx.lineWidth=on?2.5:1.5; rr(rrc.x,rrc.y,rrc.w,rrc.h,8); ctx.stroke();
       if(has){ const s=this.SHAPES[this.tray[i]], cells=on?this.orisFor(this.tray[i])[this.rot%this.orisFor(this.tray[i]).length]:this.ORIS[this.tray[i]][0];
         this.drawPiece(rrc.x+rrc.w/2,rrc.y+rrc.h/2-4,cells,13,s.col,1);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='center'; ctx.fillText(s.name,rrc.x+rrc.w/2,rrc.y+rrc.h-6); }
+        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='center'; ctx.fillText(s.name,rrc.x+rrc.w/2,rrc.y+rrc.h-6);
+        ctx.fillStyle='#ffd24a'; ctx.font='5px "Press Start 2P"'; ctx.textAlign='right'; ctx.fillText(s.tag,rrc.x+rrc.w-6,rrc.y+11); } // warmer price tag, cosmetic
       ctx.restore();
     }
     // ROTATE button (drawn, rule 4) — dim when nothing held
@@ -3273,6 +3330,49 @@ const DAILY_NAME='TUCK SHOP RUN';
 const DAILY_EPOCH='2026-07-16'; // day 1 = ship date; #N counts from here (local time)
 function dailyNumber(){ return Math.floor((Date.parse(dayKeyOf(new Date()))-Date.parse(DAILY_EPOCH))/86400000)+1; }
 
+// D33: the daily draws DAILY_PICK of GAMES.length, not the whole roster (was 11/11 — over the
+// 5-10 min target, §7). Per-day independent shuffle (stateless — coverage is statistical, not a
+// guaranteed rolling cycle; that was an explicit build choice, not an oversight).
+const DAILY_PICK=6;
+function pickDailyGames(dayKey){
+  // §3 determinism: fixed-count draw (one shuffle of a fixed-size array) off a stream salted
+  // 'daily-select' — SEPARATE from the per-game seed (mulberry32(seedBase+idx*101) below), so
+  // picking the day's 6 games never perturbs any game's own board draws, and the pick itself is
+  // identical for every player on the same day.
+  const rng=mulberry32((hashStr(dayKey)^hashStr('daily-select'))>>>0);
+  const pool=GAMES.slice();
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); const t=pool[i]; pool[i]=pool[j]; pool[j]=t; }
+  // constraint: at most one of TAZO/DAIRY (the two run-length watch items, §7) in a day's 6 —
+  // swap the later-drawn of the two out for the first non-TAZO/DAIRY game waiting in the rest
+  // of the shuffle. Deterministic, still same-for-everyone.
+  const isLong=g=>g.id==='tazo'||g.id==='dairy';
+  const longIdx=[]; for(let i=0;i<DAILY_PICK;i++) if(isLong(pool[i])) longIdx.push(i);
+  if(longIdx.length>1){
+    const swapOut=longIdx[longIdx.length-1];
+    let swapIn=-1;
+    for(let i=DAILY_PICK;i<pool.length;i++){ if(!isLong(pool[i])){ swapIn=i; break; } }
+    if(swapIn>=0){ const t=pool[swapOut]; pool[swapOut]=pool[swapIn]; pool[swapIn]=t; }
+  }
+  return pool.slice(0,DAILY_PICK);
+}
+
+// D34: skinnable per-game receipt strings (icon + snack label) for the daily share text.
+// Interim inline object — these become Phase 7.0 pack fields (games.<id>.shareLabel/shareIcon)
+// at the string-extraction unit; nz90 is the only pack today. Nostalgia labels owner-cleared
+// per D15 before shipping to players. Rule 4: these emoji are text-share only — the on-canvas
+// screens never render them, only canvas-drawn shapes/text.
+const SHARE_NZ90={
+  stack:{icon:'🥪',label:'club sammie'}, scan:{icon:'🛒',label:'checkout'},
+  howler:{icon:'🏈',label:'mega howler'}, swing:{icon:'🎾',label:'swingball'},
+  gunge:{icon:'🫗',label:'gunge tank'}, chatter:{icon:'💬',label:'chatter ring'},
+  tazo:{icon:'🎟',label:'tazo pack'}, scramble:{icon:'🍬',label:'lolly scramble'},
+  dairy:{icon:'🥧',label:'mince pie'}, bones:{icon:'🎲',label:'knucklebones'},
+  weaver:{icon:'🧶',label:'jersey knit'},
+};
+// r.id is missing on daily-state rows saved before D34 (locked/returning days from an older
+// build) — fall back to a generic tag rather than throwing, so an old locked day still shares.
+function shareMeta(id){ return SHARE_NZ90[id]||{icon:'🍽',label:'mystery item'}; }
+
 // ════════════════════════════════════════════════════════════════
 //  GAUNTLET  (Phase 3 — every game, one score)
 //  Sequences all games to first game-over via each game's onOver hook,
@@ -3296,13 +3396,15 @@ const GAUNTLET={
       // one attempt per day already used — show the locked result (or forfeit notice)
       this.locked=true;
       this.total=st.total||0;
-      this.results=(st.result||[]).map(r=>({name:r.name, contrib:r.contrib, rank:r.rank, pal:PALS[r.pid!=null?r.pid:2]}));
+      // r.id added D34 (receipt line labels) — absent on rows saved before that unit; shareMeta()
+      // falls back gracefully so an old locked/returning day still renders (with a generic tag).
+      this.results=(st.result||[]).map(r=>({name:r.name, id:r.id, contrib:r.contrib, rank:r.rank, pal:PALS[r.pid!=null?r.pid:2]}));
       this.emojiGrid=st.emojiGrid||'';
       this.state='end'; this.overAt=performance.now();
       return;
     }
     // consume the attempt now: bailing mid-run forfeits the day (true one-attempt)
-    this.locked=false; this.order=GAMES; this.idx=0; this.total=0; this.results=[];
+    this.locked=false; this.order=pickDailyGames(dk); this.idx=0; this.total=0; this.results=[];
     this.runStartAt=performance.now(); // whole-run length for telemetry (6.0)
     this.seedBase=hashStr(dk);
     saveStr('arc_daily_state',JSON.stringify({dayKey:dk,played:true}));
@@ -3332,7 +3434,7 @@ const GAUNTLET={
     this.streak=(loadStr('arc_daily_lastdone')===yk)?loadBest('arc_daily_streak')+1:1;
     saveBest('arc_daily_streak',this.streak); saveStr('arc_daily_lastdone',this.dayKey);
     this.emojiGrid=this.buildEmojiGrid();
-    const result=this.results.map(r=>({name:r.name,contrib:r.contrib,rank:r.rank,pid:PALMAP[r.id]!=null?PALMAP[r.id]:2}));
+    const result=this.results.map(r=>({name:r.name,id:r.id,contrib:r.contrib,rank:r.rank,pid:PALMAP[r.id]!=null?PALMAP[r.id]:2}));
     saveStr('arc_daily_state',JSON.stringify({dayKey:this.dayKey,played:true,total:this.total,result,emojiGrid:this.emojiGrid}));
     if(this.runStartAt!=null){ recordDailyRun(this.total,(performance.now()-this.runStartAt)/1000); this.runStartAt=null; } // whole-run telemetry (6.0)
     refreshDaily(); sGold(); // refresh the tile's cached daily state
@@ -3346,7 +3448,21 @@ const GAUNTLET={
     const tier=c=>c<100?'⬛':c<200?'🟨':c<350?'🟧':c<500?'🟩':'🟪';
     return this.results.map(r=>tier(r.contrib)).join('');
   },
-  shareText(){ return DAILY_NAME+' #'+this.dailyN+'\n'+this.emojiGrid+'\nTOTAL '+this.total+' · STREAK '+this.streak; },
+  // D34: the daily share is a priced tuck-shop receipt — one line per game (icon, snack label,
+  // $price = contrib÷100, tile). Price/tile bands derive from the same contrib, so a line can
+  // never look self-contradictory, and line prices always sum to the printed total (a real till).
+  tierTile(c){ return c<100?'⬛':c<200?'🟨':c<350?'🟧':c<500?'🟩':'🟪'; },
+  buildReceiptText(){
+    const LW=15, pad=(s,n)=>{ s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); };
+    const dots='· · · · · · · · · · · ·';
+    const lines=this.results.map(r=>{
+      const m=shareMeta(r.id), price='$'+(r.contrib/100).toFixed(2);
+      return m.icon+' '+pad(m.label,LW)+price+'  '+this.tierTile(r.contrib);
+    });
+    const total='$'+(this.total/100).toFixed(2);
+    return '🧾 '+DAILY_NAME+' #'+this.dailyN+'\n'+dots+'\n'+lines.join('\n')+'\n'+dots+'\n'+pad('  TOTAL',LW+2)+total+'  🔥'+this.streak;
+  },
+  shareText(){ return this.buildReceiptText(); },
   showToast(t){ this.toast={t,life:1.6}; },
   shareGrid(){
     const txt=this.shareText();
