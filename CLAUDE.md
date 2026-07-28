@@ -280,27 +280,74 @@ Retune **all eleven pars together** from `arc_stats`, not piecemeal — they are
 
 **Model (D20–D23, settled):** a skin is a **content pack over frozen mechanics**. Every game keeps its verb, par, seed behaviour, scoring, `id`, and `bestKey`; the skin swaps what things are *called* and *look like*. The default pack is the current NZ 90s/00s theme (`nz90`). Future packs re-reference the same games into another era (e.g. an 80s or 10s NZ pack — HOWLER becomes that era's throwing toy, TAZO its collectible craze, and so on). The daily is identical across skins (D22) — share grids and totals stay comparable. v1 packs are **strings + palettes only** (D21); per-theme sprite overrides are a later unit (the drawn objects — rocket, pie warmer, red socks — are the expensive part).
 
+**Build plan (drafted 2026-07-28 against `index.html` @ `b59efc9`, 4020 lines).** Four commit units, in order, on the default branch (branch policy, top of file). Each is independently shippable and independently verifiable; **7.0-pre and 7.0 are pure refactors with zero intended visual diff**, 7.1 is the only unit that adds UI, 7.2 is a writing exercise blocked on owner decisions. Do **not** collapse units into one commit — the byte-identical acceptance test (7.0) only means something if nothing else moves in that commit.
+
+#### 7.0-pre — Baseline hygiene (small, ships first, separate commits)
+
+These exist so 7.0's "rendered text is byte-identical" test has a *correct* baseline to freeze. Fixing copy inside 7.0 would make the diff unreadable.
+
+- **B9 — stale daily-tile copy.** `drawDailyTile()` still prints `'EVERY GAME · ONE SCORE'`, but since D33 the daily is 6 of 11. Fix to derive from the constant (`DAILY_PICK+' GAMES · ONE SCORE'`) so it can't drift again when `DAILY_PICK` is retuned at 6.5. One line. (Logged §8 B9.)
+- **B7 — `refreshMenuBests` legacy key** (optional, cheap): move STACK's inlined `cps2_best` onto the game object as `legacyKey` and read it generically. Only worth doing here because 7.0 touches every game object header anyway; skip it if it bloats the diff.
+
 #### 7.0 — String extraction (the reshaping — zero-visual-diff refactor)
 
-The prerequisite. Today every display string is inline in its game object. Extract into a default pack so games *read* their display text instead of owning it:
+The prerequisite, and the whole of Phase 7's risk. Today every display string is inline in its game object. Extract into a default pack so games *read* their display text instead of owning it.
 
-- Pack shape (suggestion — build session may refine): `const SKINS = { nz90: { label:'NZ 90s/00s', games: { howler: { name, tag, ready:[...], overTitle, tiers:[...], rankTitles:[...], ... }, ... }, hub: { dailyName:'TUCK SHOP RUN', ... } } }` with a tiny accessor (`skin()`/`S(gameId,key)`); active pack from `arc_theme`, default `nz90`.
-- **What moves**: `name`, `tag`, ready-screen lines, over-screen titles, rank **titles** (thresholds stay in the game), thematic banner strings (`GUNGED!`, `FRESH!`, `KNITTED!`, tier names), `DAILY_NAME`. **What stays inline**: mechanical/universal labels (`PERFECT!`, `+N`, `MISS`, `BEST`, `STAGE`), anything fed by numbers.
-- **Acceptance test**: with only `nz90` present, rendered text is byte-identical to pre-refactor. Do this unit alone, no other changes in the commit.
-- Palettes join the pack as index indirection later (a pack may remap `PALMAP` targets or supply new `PALS` rows) — not needed for 7.0.
+**Measured inventory** (what actually has to move — counted from the current file, not estimated):
+
+| bucket | count | where |
+| --- | --- | --- |
+| `name` + `tag` | 11 + 11 | game object headers |
+| ready-screen line arrays | 11 arrays / 40 lines | `drawReadyScreen(p,name,lines)` call sites |
+| over-screen titles | 12 (HOWLER has two: `ULTIMATE!` / `TIME!`) | `drawOverScreen` call sites |
+| over-screen sub-lines | 10 templates (SCAN passes `null`) | same call sites, number-fed |
+| rank **titles** | 64 across 11 `ranks` tables | thresholds stay put |
+| banner / `pop()` copy | ~20 (`GUNGED!` `LEAK!` `FRESH!` `HEAT ESCAPED!` `KNITTED!` `SNAPPED!` `THREAD SNAPPED!` `NEW DISC!` `TEMPO UP!` `NEW KID!` `HUNGRIER!` `UNWIND` `PERFECT SAVE!` `+RESTRIKE` `CRYING!` `CLICK` `SLAM!` `ULTIMATE!` `TIME!` `FULL CHATTER!` `FAIR SHARE! ×2`) | in-game |
+| KNUCKLEBONES `LADDER` | 7 | doubles as its rank text — one source, two readers |
+| DAIRY `SHAPES[].name` + `.tag` | 5 + 5 | pastry names + decorative `$` price tags |
+| share meta (`SHARE_NZ90`) | 11 × `{icon,label}` | migrates in per D34 |
+| hub | `DAILY_NAME`, daily tagline lines, receipt header | `drawDailyTile`, `GAUNTLET` |
+
+≈ 200 string entries; the pack lands at ~160–200 source lines. Single-file rule (rule 1) is unaffected.
+
+**What stays inline** (rule 12's real boundary — a skin must not be able to reach these): `PERFECT!`, `+N`, `MISS`, `BEST`, `STAGE`, `LOOP`, `MOVES`, `RELEASE`, `ROTATE`, `PWR`, `CLEARS`, `► TAP TO PLAY` / `► TAP TO GO AGAIN` / `HOME ICON = MENU`, `PAUSED`, `SCREENSHOT ME`, `$X.XX` prices, `'ULT'`/`'M'` marker units, `CENTRARCADE`, `PAYMENTS BY CENTRAPAY`, `<title>`, and the mark itself (rule 3 — the brand is in every era). Interaction prompts are hub furniture, not theme.
+
+**Shape.** `const SKINS={ nz90:{ label:'NZ 90s/00s', hub:{dailyName:'TUCK SHOP RUN', dailyLines:[...], ...}, games:{ howler:{name,tag,ready:[...],overTitle,overTimeout,overSub,rankTitles:[...],banners:{...},shareLabel,shareIcon}, ... } } }` plus `let SKIN_ID` (from `arc_theme`, default `nz90`) and one accessor `S(gameId,key)` with a **fallback chain: active pack → `nz90` → `''`**. A pack id in `arc_theme` that no longer exists degrades to `nz90` rather than throwing — the `PALMAP`-fallback lesson (the GUNGE-launch freeze), applied to strings.
+
+**Three mechanisms, chosen deliberately** (this is the part a build session should not improvise):
+
+1. **`name` / `tag` / `ranks` / `LADDER` become getters on the game object literal** — `get name(){ return S(this.id,'name'); }`. Every existing call site (`drawMenu`'s `g.name`, `GAUNTLET`'s `cur.name`, `rankFor(this.ranks,…)`) is then **unchanged**, resolution is live so a skin switch needs no re-init, and nothing mutates. Plain JS, no build step.
+2. **`ranks` keeps its thresholds in the game, its titles in the pack.** Each game holds an invariant `RANK_S:[0,10,20,35,50]` (visibly theme-invariant, rule 12) and the getter zips it with `S(id,'rankTitles')` into the existing `[{s,t}]` shape. **Memoise per (`SKIN_ID`,`id`)** — `ranks` is read inside `render()`, and re-zipping 64 strings every frame is waste. Invalidate the memo on skin switch. A dev-time length check (`RANK_S.length === rankTitles.length` for every game in every pack) catches a short pack before it ships a blank rank.
+3. **Number-fed lines become format strings, not functions.** `overSub:'HEIGHT: {0} BLOCKS'` with a two-line `fmt(str,...args)`. **Packs contain no executable code** — that is what keeps rule 12 enforceable by inspection. This extracts slightly more than the doc's original minimum (the whole sub-line, not just its thematic noun) on purpose: one place to edit copy, and the game still supplies every number.
+
+**Verified while planning — no landmines in these two:**
+- DAIRY's shape textures key on the **shape index** (`grid[i]={col,shape:shapeIdx}` → `drawPastryDetail(shapeIdx,…)`), not on `SHAPES[].name`. Renaming a pastry in a pack cannot break its texture. No re-keying needed.
+- Nothing in any `update()` path compares against a display string (the only `===` on a `.t` is TAZO's numeric **tier**, not a rank title). Extraction cannot alter behaviour.
+
+**One real bug the extraction exposes — fix it in 7.0:** `GAUNTLET.capture()` stores a *resolved* `name`, and `finish()` stores a *resolved* `rank`, into `arc_daily_state.result`; `drawBars` renders `r.name`/`r.rank` straight back. Switch skins, then reopen a locked day, and the receipt shows the **old** pack's labels. D34 already added `id` to those rows, so `name` re-resolves via `S(r.id,'name')`; `rank` needs a stored **rank index** (`ri`) beside it to re-resolve — add it, and fall back to the stored string for rows written before this unit (same back-compat pattern D34 used). Byte-identical under `nz90`, correct under a switch.
+
+**Acceptance test — mechanical, not eyeballed.** Headless Chromium, monkeypatch `ctx.fillText` to record `[text,x,y,font]`, then drive every text surface: menu pages 0–4, the daily tile in all three states, each game's `ready` and a forced `over` (`cur.init(); cur.st='over'; cur.score=<fixed>; cur.render()`), plus interstitial / end / share card against a fabricated 6-line result set. Dump JSON on `b59efc9` and on the refactor commit; **the diff must be empty**. Screenshot the same surfaces as a second, human-legible check. Add `buildReceiptText()` output to the diff — the share text is display copy too.
+
+- Palettes join the pack as index indirection at 7.2 (a pack may supply `pal:{<gameId>:<PALS index>}` overrides, or append new `PALS` rows — appending is already safe because `CHATTER_PALS` is an explicit list, §3). **Not needed for 7.0** — keep this unit strings-only.
 
 #### 7.1 — Selector + unlock (D23)
 
 - NZ-90s default. A **drawn** skin selector (rule 4) appears on menu page 0 once `arc_daily_streak ≥ 3`; freely switchable thereafter; choice in `arc_theme`. Before unlock, no UI hint beyond (optionally) a locked chip — keep it quiet.
-- Switching is instant and touches display only. The daily share text may carry the pack's daily-name — totals/grid stay comparable regardless (D22).
+- **Where it goes:** menu page 0 is `dailyTileRect()` = y172–516, and `menuNav()`'s dots sit at y = H−52 = 588. The band **y≈524–566 is free** — the selector is a horizontal **chip strip** there, one chip per installed pack, each drawn as a rounded pill carrying that pack's palette swatch + its `label` (all canvas paths, rule 4). Sized for N packs, correct at N=2. Geometry goes in a `skinChips()` function beside `dailyTileRect()`, matching how the rest of the menu resolves hit targets.
+- **Wiring:** hit-test in `onUp` **before** the `menuPage===0` daily-tile branch (that branch `return`s). Selection resolves on `pointerup` like every other menu target, so a page swipe still wins over a chip tap — do not add a `pointerdown` path (menu drag/tap separation, §3). Unlock reads `dailyCache.streak`, already loaded on menu entry. Switching = `SKIN_ID=id; saveStr('arc_theme',id); invalidate the rank-title memo; sTick()`. No re-init, no reload: every display string resolves through the getters, so the next frame is already themed.
+- Switching is instant and touches display only. The daily share text carries the **sharer's** pack labels and daily-name; tiles, prices, and the total stay comparable regardless (D22) — that asymmetry is the design, note it in the share code.
 
 #### 7.2 — First alternate era pack
 
 - Strings + palettes for one more era (**owner to pick: 80s or 10s**, and the reference for each game — this is a naming/writing exercise, logged per game as ideas arrive). Nostalgia references stay literal per D15's spirit — owner clears each.
+- Scope per game: `name`, `tag`, 3–4 ready lines, over title(s) + sub-line template, `RANK_S.length` rank titles, its banner set, `shareLabel`/`shareIcon` — i.e. exactly the pack shape 7.0 froze, ~200 strings. Adding a pack must require **zero** engine edits; if it doesn't, 7.0 was under-built.
+- Palette half: pack-level `pal:{<gameId>:<index>}` overrides, plus any appended `PALS` rows the era needs. `PALMAP` stays the default; a pack that supplies no `pal` block looks structurally identical to `nz90`.
 - Sprite overrides (per-theme draw functions) are **v2**, explicitly out of scope here.
 
 *Skin idea log (append; don't build until 7.2):*
 - *(empty — era candidates and per-game reference ideas go here)*
+
+**Effort + risk read.** 7.0 is one focused session — mechanically large (≈200 call sites) but conceptually flat, and the recorded-`fillText` diff makes it self-proving. 7.1 is roughly half a session and is the only unit with new UI to approve on-device. 7.2 is writing-bound, not code-bound, and cannot start until the owner picks an era and clears the references (D15). The one genuine risk is scope creep inside 7.0 — every tempting copy fix found mid-refactor belongs in a 7.0-pre commit or a 6.4 entry, never in the extraction commit.
 
 ---
 
@@ -378,7 +425,9 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 - ~~**TAZO difficulty**~~ — RESOLVED 2026-07-20 (D28): owner reopened and shipped **all-tier-0 spawns** (6.2b). `par 2000` + ranks are `// PROVISIONAL` pending the 6.5 telemetry retune.
 - **GUNGE contestant layout** — RESOLVED (6.3): shipped the tank-below-grid option (valve nudged to y514, `GY` kept). Owner to approve the look on-device (screenshots provided in the build session).
 - **CHATTER stage-0 colour** — its in-play stage 0 uses hub purple (PALS[2]) and mismatches its green menu card. Pre-existing (the old modulo did the same). If unwanted: drop `2` from `CHATTER_PALS` — deliberate one-line recolour. Decide when CHATTER is next touched.
-- **First alternate skin era** — 80s or 10s, and the per-game references (Phase 7.2 idea log).
+- **First alternate skin era** — 80s or 10s, and the per-game references (Phase 7.2 idea log). **Blocks 7.2 entirely** — 7.0 and 7.1 can ship without it.
+- **Skin selector form (7.1)** — planned as a drawn chip strip in the free band at y≈524–566 on menu page 0, one pill per pack (palette swatch + label). Owner to approve the look on-device once built; alternatives if it reads badly are a single cycling chip or a small drawn sheet.
+- **Cross-skin share labels (7.1/D22)** — the plan has the receipt carry the **sharer's** pack labels while tiles/prices/total stay comparable. Two players on different eras therefore see different snack names for the same day's line. Believed correct per D22 ("skin may relabel only") — owner to confirm, since it is the one place a skin is visible to someone else.
 - **Which games get pruned**, if any, and the target roster size (D26; after 6.0/6.5 data).
 - **SCRAMBLE/CHATTER attention-mechanic overlap** — tolerated; revisit at prune time.
 - **Share comparability (D33/D34).** The receipt is 6 lines, and the lineup changes daily, so **cross-day** shares aren't tile-comparable — this is now **by design** (each day is its own puzzle). **Same-day** shares stay perfectly comparable (everyone gets the same 6 games + labels). Noted in the share code.
@@ -429,6 +478,8 @@ These slot into the Phase 7.0 pack as `games.<id>.shareLabel` / `shareIcon`; inl
 - **B5 — `frame()` try/catch — still deferred, deliberately.** One thrown frame kills the rAF loop (the GUNGE-launch freeze); the single-`PALMAP`-with-fallback fix removed the known trigger. A catch-and-drop-frame wrapper could mask real bugs — revisit only if another freeze class appears. Record kept so future sessions don't re-litigate blind.
 - **B6 — Press-game ready/over latency (accepted, documented).** For games declaring `press`, ready-start and over-restart fire on *release*, not pointerdown — a one-frame-feel delay vs tap games. Cost of the D12 contract; do not special-case.
 - **B7 — `refreshMenuBests` inlines STACK's legacy key.** Cleaner: an optional `legacyKey` field on the game object read generically. Cosmetic; fold into any 6.0 pass touching that function.
+- **B9 — stale daily-tile copy (found 2026-07-28, fix in 7.0-pre).** `drawDailyTile()` prints `'EVERY GAME · ONE SCORE'`, but since D33 the daily draws 6 of 11 — the line has been wrong since 6.6. Fix by deriving it from `DAILY_PICK` so it can't drift again when the count is retuned at 6.5. Ships **before** the 7.0 extraction, as its own commit, so 7.0's byte-identical acceptance test freezes correct copy.
+- **B10 — daily receipt stores resolved labels (found 2026-07-28, fix in 7.0).** `GAUNTLET.capture()` stores a resolved `name` and `finish()` a resolved `rank` into `arc_daily_state.result`; `drawBars` renders them back verbatim. Harmless today (one skin), wrong the moment 7.1 ships: reopening a locked day after a skin switch shows the previous pack's labels. `name` re-resolves from the `id` D34 already stores; `rank` needs a stored rank **index** (`ri`) beside it, with a fallback to the stored string for older rows.
 - **B8 — HOWLER `pointercancel` velocity quirk (accepted).** A cancelled gesture routes through `release(lastCoords)`; a stale/slow cancel no-ops (dt > `MAX_DT`), a fast one may legitimately fire. Accepted per D12 — no per-game input hacks.
 
 ## 9. Style conventions
