@@ -2,10 +2,11 @@
 
 Single-file HTML5 arcade hub of quick Centrapay-branded games built on a shared 16-bit engine. One-thumb, portrait, mobile-first. The entire app is `index.html`.
 
-**Phases 1–5 are SHIPPED.** The roster is settled at **11 games** (STACK · SCAN · HOWLER · SWINGBALL · GUNGE · CHATTER · TAZO · SCRAMBLE · DAIRY · KNUCKLEBONES · WEAVER) plus the once-a-day seeded **TUCK SHOP RUN** daily, which since D33 (6.6) draws a day-seeded 6-of-11 rather than all 11. **The base-game era is over — no new games.** Work now proceeds in this order:
+**Phases 1–5 are SHIPPED.** The roster is **11 games shipped** (STACK · SCAN · HOWLER · SWINGBALL · GUNGE · CHATTER · TAZO · SCRAMBLE · DAIRY · KNUCKLEBONES · WEAVER) **targeting 15 gross** (D36), plus the once-a-day seeded **TUCK SHOP RUN** daily, which draws a day-seeded subset rather than the whole roster (D33; `DAILY_PICK` 6 → 5 at D37). The roster was reopened at D36 for **four** additions — RECALL · LOCK · ROUND · CHUTE (Phase 7.5) — after which it closes again pending prune calls (D26). Work now proceeds in this order:
 
 - **Phase 6 — REFINEMENT ⬅ IN PROGRESS.** Telemetry first, then per-game polish (HOWLER redesign (2D distance course) + rocket redraw, TAZO difficulty + colour separation, GUNGE contestant-in-tank), housekeeping, the roster-wide par retune, and one shipped **determinism bug fix (B1)**.
 - **Phase 7 — SKINS ⬅ IN PROGRESS.** Cosmetic era packs (default: NZ 90s/00s) over frozen mechanics. **7.0 (the string extraction) is SHIPPED** — display text now lives in `SKINS.nz90`, not in the game objects. Next: 7.1 selector + unlock, then 7.2's first alternate era pack.
+- **Phase 7.5 — ROSTER EXPANSION.** Four new games, built pack-native after the 7.0 extraction and before the first alternate era pack (D38).
 - **Phase 8 — MUTATORS** and **Phase 9 — CREATURE**: **placeholder idea logs only. Do not build.** Append owner ideas as they arrive.
 
 Pruning a game or two over time remains on the table (D26) — decided from telemetry, not vibes.
@@ -275,7 +276,9 @@ Running list — append as observations arrive; each item stays independently sh
   - **Constraints held:** stays inside D18 (tray-of-3, `trayDead` loss, strike wipes, 3 strikes = over) and D13 (tap-only). **DD4 (strike relief) is untouched** — parked per §7, needs an explicit owner reopen. `dealTray()` still draws exactly one seeded index per tray slot regardless of `SHAPES.length` — fixed-count, §3-safe (wider value range, same draw count). Par is unchanged here (`2200`, still due to possibly come **down** at 6.5).
 - *(empty slots — this is the refinement idea log)*
 
-#### 6.5 — Roster-wide par retune (needs 6.0 data)
+#### 6.5 — Roster-wide par retune (needs 6.0 data) — ⏸ DEFERRED by D41
+
+**Blocked until all 15 games have telemetry, then runs once** (D41): par is the exchange rate between games in the daily total, so retuning 11 and re-retuning 15 wastes the data and produces two incomparable eras of totals. The skew notes below stay valid as the inputs to that single pass.
 
 Retune **all eleven pars together** from `arc_stats`, not piecemeal — they are the exchange rate between games in the daily total. Current provisional set and known skew: STACK 20, SCAN 35, HOWLER — void; the 6.1 redesign changes the scoring model entirely (speed→points, not centre/rim hits). Re-derive par + ranks from the new model's telemetry, not by adjusting 500. SWINGBALL 40, GUNGE 300 (**up**, ~1200 revised guess — `remaining×segments` is multiplicative and the 3× timer buff raised `remaining`), CHATTER 600, TAZO **2000 provisional** (was 4500 — 6.2b all-tier-0 difficulty fix (D28) shortened runs to ~1.3 min median / ~2.2 min p90 and lowered scores; confirm par + ranks from telemetry here), SCRAMBLE 120 (likely down further post-S2), DAIRY 2200 (may need **down** — the greedy sim over-states a clock-less human game, and DD1/DD2 tightened the board since), BONES 90, WEAVER 1000. Also retune `DAILY_PICK` (6.6/D33) from telemetry once there's real run-length data.
 
@@ -312,7 +315,84 @@ Display text no longer lives in the game objects. `SKINS` sits above the game bl
 - Sprite overrides (per-theme draw functions) are **v2**, explicitly out of scope here.
 
 *Skin idea log (append; don't build until 7.2):*
-- *(empty — era candidates and per-game reference ideas go here)*
+- *(2026-08-02, D43)* Banked alternates for the four Phase-7.5 games: RECALL = takeaway delivery jingle (Eagle Boys / Pizza Hut `0800 83 83 83`) · LOCK = Sky decoder parental lock · ROUND = school cross country · CHUTE = Video Ezy return chute. All pending D15.
+- *(2026-08-02)* Observation for whichever era lands at 7.2: the jingle, the combination lock, the delivery round and the returns chute all **port cleanly across decades** — every era has all four — which makes them the safest structures if the goal is one skin architecture rather than four bespoke ones.
+- *(empty slots — era candidates and per-game reference ideas go here)*
+
+---
+
+### Phase 7.5 — ROSTER EXPANSION (four games)
+
+Four additions closing the roster's four biggest category gaps: **memory** (RECALL), **deduction** (LOCK), **scrolling dodge** (ROUND), **rule-switching discrimination** (CHUTE). Built after 7.0 so every display string is pack-native from commit one (D38).
+
+Universal constraints — all four:
+
+- Endless + 3 lives (D39). Rule 9: reuse `drawBG` / `drawReadyScreen` / `drawOverScreen` / `burst` / `pop` / rank helpers. Rule 4: every icon and symbol drawn, never a glyph.
+- Seeded content **correct-by-construction with a fixed draw count per round/stage/board** (D16, §3). Player pace must never shift the stream — this is the WEAVER B1 bug class and it does not ship twice.
+- §9 holds: a stray or ambiguous input is a free no-op with a soft reject, never a life.
+- `par` + `ranks` are `// PROVISIONAL` placeholders until D41's retune.
+
+All constants below are `// PROVISIONAL` design intent, not spec-final. Each game's **theme** sub-bullet is PARKED pending D15 clearance (D43) — the four mains are brand-free as specified, so 7.5 may build against them.
+
+---
+
+#### RECALL — memory sequence
+
+- `id:'recall'`, `bestKey:'arc_recall_best'`. Verb: **TAP only** — no `press`, so it stays on tap-on-pointerdown (D12).
+- **5 pads** on a ring, reusing CHATTER's 5-slot / 72° geometry (rule 9). 4 reads as generic Simon and carries too little information per item; 6 crowds 360px under a thumb.
+- **Playback: the whole sequence replays each round**, one item appended. Playback interval **shrinks with length to a floor** (`PB_BASE ≈0.62s`, `−0.03/item`, `PB_FLOOR ≈0.26s`) — without this, watch time grows quadratically and round 12 is a ~9-second spectate.
+- **Miss = −1 life, same length replayed from the top of the round.** 3 lives = over.
+- **Score.** Each correct item banks the **current round length** — so a clean round of length *n* is worth *n²*, and a round failed halfway still banks partial credit. The all-or-nothing cliff is what makes memory games normalise badly against par; this removes it. Plus **RECITE ×1.5** on a round entered with every tap inside `FLUENT_GAP` (≈0.55s) of the last — rewards chunked recall over deliberate re-derivation.
+- **Channel is visual and must stay fully playable with `arc_mute` on** (rule 5). Pad tones are reinforcement only; a muted player loses nothing.
+- Seeding: one draw per round appended, fixed count. Replays consume nothing. Nth-draw safe.
+- **Theme — main: the dial-up handshake.** The five pads are five recognisable components of the Xtra 56k negotiation (the dial tone, the hiss, the two-note handshake). Each day's seeded sequence is a different negotiation — some days it connects fast, some days it's a long painful handshake. Fail copy: `CONNECTION LOST`. *Clearance note: brand-free* — it's a sound everyone of that era knows, with no named product, so this is the cleanest of the four on D15. *Banked alternate (7.2):* **the delivery jingle** — pads as notes building a takeaway jingle, hooks being Eagle Boys and the Pizza Hut `0800 83 83 83` number. Strong because it's a sequence people genuinely memorised as kids, and it ties into the tuck-shop/food thread. **Both are named brands — D15 clearance required.**
+
+#### LOCK — deduction
+
+- `id:'lock'`, `bestKey:'arc_lock_best'`. Verb: **TAP** — cycle a slot's symbol, tap a drawn SUBMIT (DAIRY rotate-button / GUNGE valve precedent).
+- **Code: 3 slots × 6 symbols, repeats allowed** (216). Escalates to **4 slots from lock 3** (1296), capped at 4. Escalation is where run-length pressure lives.
+- **Mastermind pegs.** Black = right symbol, right slot. White = right symbol, wrong slot. **Standard multiset counting: exact matches are removed first, then each remaining guess symbol consumes at most one remaining code symbol.** Spelled out so Code can't ship the naive double-count bug.
+- **Guess budget: 5 at 3 slots, 6 at 4 slots.** Exhausted = **−1 life**, code revealed, new lock. 3 lives = over.
+- **Soft clock = a per-lock BONUS METER only** (D3/D19, GUNGE and WEAVER precedent). It drains, it banks on solve, and hitting 0 **never** fails the lock or ends the run.
+- **Score on solve:** `(guessesLeft × slots × 10) + clockRemaining`. A failed lock banks nothing.
+- **Symbols must differ in SHAPE, not only hue** — the TAZO 6.2/6.2c ΔE lesson, plus six symbols on a dark field is where colourblind readability breaks.
+- Seeding: `slots` draws per code, fixed count. Guesses consume nothing. Nth-draw safe.
+- **Theme — main: big sister's diary padlock.** Cracking the code reveals one line of the diary on the solve screen — a reward beat per lock, which suits LOCK's chained structure better than a bare SOLVED banner. Three failed locks and she comes back into the room (the existing 3-lives terminal, reskinned). Diary lines are pack strings; they need writing as part of the pack and are subject to the same tone bar as the rest of the copy. *Banked alternate (7.2):* **the Sky decoder parental lock** — four digits between you and something you're not meant to be watching; the D19-style bonus meter reads as how long until someone comes down the hall. **Named brand — D15 clearance required.** (The bike-shed combination was the third option and was not selected; leaving it unlogged rather than half-parked.)
+
+#### ROUND — lane dodge
+
+- `id:'round'`, `bestKey:'arc_round_best'`. Verb: **coarse directional swipe L/R**, reusing TAZO's `press`/`release` + `DIR_THRESH` primitive (rule 9, D12). One lane-hop per swipe; a hop animates ~120ms and **is not cancellable mid-hop**.
+- **3 lanes.** No held pointer state exists, so the B8 `pointercancel` class doesn't arise here.
+- ⚠️ **Trade recorded (owner-chosen, 2026-08-01):** lane-snap makes ROUND a **discrete** game. It fills the scrolling-course/dodge gap; the roster still has **no continuous-input game**. Flagged in §7, not a defect.
+- **Course: finite per stage, generated WHOLE at stage start from the seed, fixed draw count.** Spawn-as-you-scroll is explicitly **banned** here — it is exactly the WEAVER B1 divergence (§3). Clearing a stage regenerates a longer/faster one.
+- **Hit = −1 life.** 3 lives = over.
+- **Score: pickups are the score, distance is the clock.** Course length is fixed per stage; `+N` per pickup; stage completion banks a bonus scaled by stage; a stage cleared with zero hits banks a **CLEAN RUN** bonus. **Not** `distance × pickups` — multiplicative scoring is the GUNGE par lesson.
+- **Theme — main: mowing the lawns.** Three strips up the section map onto the three lanes. Pickups are the rows still uncut; hazards are the hose, the sprinkler, and the brick left in the long grass. *Clearance note: brand-free.* *Banked alternate (7.2):* **school cross country** — three lanes of a borrowed farm paddock, dodging cow pats, an electric fence, and the kid who sprints the first hundred metres then walks. Brand-free, but era-agnostic to the point of being timeless, which makes it a weaker nostalgia slot than the lawns.
+
+#### CHUTE — sort under a shifting rule
+
+- `id:'chute'`, `bestKey:'arc_chute_best'`. Verb: **coarse directional swipe L / DOWN / R** on the item at the chute mouth → bins at bottom-left / bottom-centre / bottom-right. Direction maps to bin **position**, so the mapping is spatially self-evident. Reuses TAZO's swipe primitive (rule 9).
+- **3 bins.**
+- **The flip (D42): the sort CRITERION changes at stage-up** — colour → shape → size — announced by a **~2s telegraphed banner before it takes effect**. Bin mapping and labels never change and never lie.
+- **Wrong bin = −1 life** (owner-chosen). 3 lives = over.
+- **An item that falls through unsorted: OPEN — owner call (§7).** Recommendation: **no life, streak resets.** The §9 ethos is that a life is the price of a committed wrong decision, not of hesitation.
+- **Score: per correct item, with a STREAK multiplier that resets on any wrong bin.** Differentiator, stated because CHUTE, SCAN and SCRAMBLE all look like "things arrive, act on them": **SCAN scores raw clear rate. SCRAMBLE scores evenness across recipients. CHUTE scores accuracy-gated throughput.**
+- Seeding: **pre-generate the stage's item list at stage start** (fixed count) rather than streaming draws — keeps it Nth-draw safe instead of inheriting SCAN's accepted-divergence exemption.
+- **Theme — main: the paper run (depot sort).** Three bags — the daily, the free community paper, the junk mail. The D42 criterion flip runs publication → street run → houses with a No Junk Mail sticker, telegraphed as always; bin mapping and labels never change. *Clearance note: brand-free if the publications stay generic* — naming a specific masthead pulls it into D15. *Banked alternate (7.2):* **the Video Ezy return chute** — new releases, weeklies, overnights, with the criterion flipping to genre, and an unrewound tape costing you. **Named brand — D15 clearance required.**
+
+---
+
+#### 7.5 build-time checklist (rewrite these ONLY in the commit that ships each game)
+
+1. **Header roster line** — 11 shipped → 12/13/14/15 as each lands.
+2. **§2 keys table** — add `arc_recall_best`, `arc_lock_best`, `arc_round_best`, `arc_chute_best` as each ships. No legacy-key inheritance for any of them (D1 precedent).
+3. **§3 determinism model** — add each game to the **fixed-count-per-board/round** bullet. None of the four may join the *inherently divergent* list.
+4. **§3 pointer-stream note** — ROUND and CHUTE become `press`+`release` consumers (no `drag`), TAZO-style. RECALL and LOCK stay tap-only.
+5. **§4** — one as-shipped entry per game, written from the code, not from this brief.
+6. **`GAMES` array + daily order** — placement is a pacing call; keep the twitch/calm alternation the current order has.
+7. **`PALMAP`** — four new entries. Whether they reuse existing `PALS` indices (HOWLER already shares `PALS[0]`) or need new ones is an owner call at build; a missing entry must still degrade to `PALS[2]`, never throw.
+8. **`DAILY_PICK` 6 → 5 (D37)** — ships with the *first* new game, not the fourth. Touches: §6.6 text, the constant, and the **receipt layout** — `drawBars` row heights in `drawDailyEnd` / `drawSharecard` were tuned at 58px for 6 rows and the interstitial at 48px for 5; re-verify at 5 lines with the longest names before shipping.
+9. **§6.5 par retune** — remains blocked until all 15 have telemetry (D41).
 
 ---
 
@@ -361,7 +441,7 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 | D17 | GUNGE releases on a drawn RELEASE valve; manual release banks `remaining × segments`; auto-release at 0 banks nothing; clean connection always lands + advances; mis-solved release always leaks −1 life. |
 | D18 | DAIRY is a tray-of-3, place-in-any-order packer; loss = "no tray piece fits anywhere"; strike wipes the shelf (can't chain); 3 strikes = over. |
 | D19 | WEAVER: (a) rope-constrained moves; (b) thread starts only on the carved-endpoint bollards; (c) lives are hazard-only — release = free retry; (d) the per-board clock is a bonus meter, never a terminator. Self-crossing via `segsCross`, hazards via `segDist`. |
-| D20 | **The base-game era is over; skins are cosmetic content packs over frozen mechanics.** Verbs, pars, rank thresholds, seeds, scoring, ids, bestKeys, and the daily sequence are theme-invariant (rule 12). Skins never swap games in or out. |
+| D20 | **The base-game era is over; skins are cosmetic content packs over frozen mechanics.** Verbs, pars, rank thresholds, seeds, scoring, ids, bestKeys, and the daily sequence are theme-invariant (rule 12). Skins never swap games in or out. *(The "base-game era is over / no new games" clause is reversed by **D36** — four additions, Phase 7.5. Everything else in this row stands unchanged, including for the new games.)* |
 | D21 | **Skin v1 = strings + palettes only.** Per-theme sprite/draw overrides are a later unit — the drawn objects are the expensive half of theming. |
 | D22 | **The daily is identical across skins.** Same seed, same boards, same pars, same normalisation — share grids and totals comparable between players on different skins. Skin may relabel only. |
 | D23 | **NZ-90s (`nz90`) is the default skin.** A drawn selector appears once `arc_daily_streak ≥ 3`; freely switchable; stored in `arc_theme`. No first-run choice screen. |
@@ -377,6 +457,15 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 | D33 | **The daily draws 6 of 11, not all 11 (owner-directed, 2026-07-22).** Resolves the §7 daily-length flag via the sanctioned "seeded subset" option (not a prune, not accept). Selection is a **deterministic bag**: shuffle all 11 from a day-seeded PRNG (`mulberry32(hashStr(dayKey))`), deal 6, **constraint: at most one of {TAZO, DAIRY} per day** (the two run-length watch items) so the run holds ~5–8 min; refill+reshuffle the bag when it drains so every game surfaces on a regular cadence. Same 6, same order, for everyone that day (rule 12 / D22 — selection is part of "the daily sequence," theme-invariant; seed from `dayKey` only, never from `arc_theme`). Contained change: the controller already sequences `this.order`, so this is "set `this.order` to the 6-pick" — `idx`, interstitial `/6`, finish check, and the par-normalised total all follow. Count is a constant `DAILY_PICK=6` for later retune. Orthogonal to pruning (D26): subset-of-N and prune-the-pool compose. A game's `idx`-derived seed now varies day to day → more board variety, no determinism cost. |
 | D34 | **The daily share is a tuck-shop receipt with prices (owner-directed, 2026-07-22).** Refines D8's emoji grid (still card + text, no backend — not a reopen). Each of the day's 6 games is a receipt line: `<shareIcon> <shareLabel> <price> <tile>`, where **price = contrib ÷ 100** formatted `$X.XX` and the tile is the existing contrib tier. Prices sum to the run total like a real till; price bands and tile bands align automatically (both from the same contrib, so a line can never look self-contradictory). `shareLabel`/`shareIcon` are **skinnable display strings** (Phase 7.0 pack fields; inline under `nz90` until extraction) — a future era pack remaps the snacks; tiles/prices/total stay comparable (D22). Lineup + labels are shared for the day; prices + tiles are the personal result (the Wordle contract). **Rule 4:** emoji live only in the **copied/shared text**; the on-canvas receipt draws its own tiles + text (like the current end-screen chips). **Impl note:** add game `id` (or the resolved label) to each stored `arc_daily_state.result` row so the receipt rebuilds on a locked/returning day (today's stored row keeps `name`/`contrib`/`rank`/`pid`, no `id`). Nostalgia labels owner-cleared per D15 (proposed set below). |
 | D35 | SCRAMBLE S1 arrivals use a walk-in queue over the existing 5 fixed slots (owner-directed) — not a 6th slot. A kid who reaches sustained high contentment walks off happy, freeing their slot; a new kid walks in after a short gap. No change to `xs`, tap targets, or THROW_X/THROW_Y. |
+| D36 | **The roster is reopened for exactly four games** — RECALL, LOCK, ROUND, CHUTE. This reverses **only** D20's "base-game era is over / no new games" clause. D20's substantive invariant — *skins are cosmetic content packs over frozen mechanics* — and rule 12 stand **unchanged**: the four new games are frozen the same way once shipped. Target is **15 gross**; D26 pruning stays live and may land the net lower. |
+| D37 | **`DAILY_PICK` 6 → 5**, shipped alongside the first new game. A 15-game roster at 6/day overruns the 5–10 min target; 5 holds it and gives a 5-line receipt. Per-game appearance rate moves ~55% → ~33% — accepted: variety over familiarity. |
+| D38 | **Sequencing: 7.0 extraction → 7.5 roster expansion → 7.2 first alternate era pack.** New games are built **pack-native** (display strings live in the pack from the first commit, never inline). No second era pack may ship against an 11-game roster and be retro-fitted afterwards. |
+| D39 | **D14 stands unamended — no new exceptions.** All four are endless + 3 lives: RECALL lengthens forever; LOCK chains locks (out of guesses = 1 life, new lock); ROUND chains finite courses as stages (WEAVER precedent); CHUTE is an endless sorted stream. TAZO remains the sole board-lock exception. |
+| D40 | **The ≤1-of-{TAZO, DAIRY} daily constraint is unchanged.** LOCK is a §7 run-length **watch item**, not a constraint member — its fixed guess budget hard-bounds each lock and the life count bounds the run. Revisit only from telemetry. |
+| D41 | **The 6.5 roster-wide par retune is deferred until all 15 games have telemetry, and then runs once.** Par is the exchange rate between games in the daily total; retuning 11 and then re-retuning 15 wastes the data and produces two incomparable eras of totals. |
+| D42 | **CHUTE's flip is the sort CRITERION, telegraphed — never the bin mapping and never the labels.** CHUTE is the roster's rule-switching game; a game that lies about which bin is which is a reflex game with extra steps, and the roster already has two. Binding against drift at build. |
+| D43 | **Each Phase-7.5 game ships with one main `nz90` theme and one banked alternate** (owner-directed, 2026-08-02). Main: RECALL = dial-up modem handshake · LOCK = big sister's diary padlock · ROUND = mowing the lawns · CHUTE = the paper run (depot sort). Banked alternates for the 7.2 pack: RECALL = delivery jingle · LOCK = Sky decoder parental lock · ROUND = school cross country · CHUTE = Video Ezy return chute. **All four mains and all four alternates are PARKED pending D15 clearance** — none may ship until the owner clears the specific references. |
+| D44 | **The paper run belongs to CHUTE, not ROUND** (owner-directed, 2026-08-02). Both games could carry it and D33's shuffle can't guarantee they land the same day, so splitting one artefact across two games that usually appear apart was rejected. ROUND takes mowing the lawns instead. |
 
 ## 7. Open decisions (owner to resolve — flag, don't guess)
 
@@ -397,6 +486,19 @@ Idea log only. Settled shape when it eventually builds (D6/D7): pixel tamagotchi
 - **Share comparability (D33/D34).** The receipt is 6 lines, and the lineup changes daily, so **cross-day** shares aren't tile-comparable — this is now **by design** (each day is its own puzzle). **Same-day** shares stay perfectly comparable (everyone gets the same 6 games + labels). Noted in the share code.
 - **DAIRY strike-relief (DD4) — PARKED, owner call (reopens D18).** The strike-wipes-the-whole-shelf-and-refreshes rule is *why* DAIRY is near-unlosable — it's the highest-leverage difficulty lever. Options if reopened: wipe only the bottom row / make the wipe cost banked points / 2 strikes instead of 3. **Not built** — D18 fixes "strike wipes shelf + fresh tray, 3 strikes = over," so this needs an explicit owner reopen before anyone touches it.
 - **`shareLabel`/`shareIcon` per game (D34).** Proposed `nz90` set below; owner clears each snack reference (D15) before it ships.
+
+*Phase 7.5 (roster expansion):*
+
+- **ROUND continuous-control gap.** Lane-snap was the owner's pick; the roster consequently has no continuous-input game at all. Revisit at prune time or if a 16th slot ever opens.
+- **CHUTE unsorted-item rule.** Life, points, or streak-only? Recommendation on file: streak-only. Owner call before build.
+- **LOCK run length.** Deduction with only a soft clock is the new TAZO-shaped tail risk (D40). Measure at first telemetry; escalate to the ≤1-per-day constraint set only if data demands it.
+- **RECALL playback ceiling.** If `PB_FLOOR` still leaves round 14+ a long spectate, the fallback is replay-from-item-*k* rather than from item 1 — a real mechanic change, so owner-only.
+- **D15 clearance for the Phase-7.5 themes (D43).** Owner sign-off owed on: Eagle Boys and the Pizza Hut `0800 83 83 83` number (RECALL alternate), Sky (LOCK alternate), Video Ezy (CHUTE alternate), and any named masthead if CHUTE's paper run stops being generic. The four **mains** are brand-free as specified — dial-up, diary, lawns, paper run — so 7.5 can build against them; the alternates block only 7.2.
+- **Share icons and share labels for the four new games** (D34 receipt lines, D15 clearance) — still owed. Working names only until then.
+- **RECALL muted-play check against the dial-up theme.** The theme is a *sound* memory but the mechanic is visual (rule 5 / the 7.5 spec). Confirm on-device that the pad animation carries the whole sequence with `arc_mute` on — a theme that only works with audio would break the constraint the game was specced under.
+- **LOCK diary lines** — how many, who writes them, and whether they're seeded per lock or per day. Cosmetic, but it's the reward beat, so it needs more than filler.
+- **Menu paging at 15 cards.** `PER_PAGE=4` ⇒ 4 game pages, page 0 still the daily tile. Fits; confirm the dots/arrows read cleanly at 4.
+- **Byte budget.** Four games in a single file with no build step — check total size against iOS Safari load on-device before the last one lands.
 
 **Receipt share — spec detail (for the D34 build unit).**
 
