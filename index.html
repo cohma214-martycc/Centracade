@@ -2181,8 +2181,10 @@ const TAZO={
 //  NOTE: the spec's spatial "greedy kids drift to dropped lollies" is
 //  deferred — directed throws always connect in v1; per-kid decay carries
 //  the greedy-kid pressure.
-//  Phase 4.5 R1 dial-up: 4 starting kids (0–3), wake-any-kid stage-ups,
-//  faster decay (6.5 / +1.9), 10s stages. par:120 still provisional (may drop).
+//  Phase 4.5 R1 dial-up: wake-any-kid stage-ups, faster decay, shorter stages.
+//  Phase 6.4 S1 (D35): a walk-in QUEUE over the same five fixed slots — start 3,
+//  fed kids walk off happy and free their slot, new kids arrive at stage boundaries
+//  and once mid-stage. Slots/xs/tap targets unchanged. par:120 still provisional.
 // ════════════════════════════════════════════════════════════════
 const SCRAMBLE={
   id:'scramble', name:'SCRAMBLE', tag:'SHARE THE LOLLIES',
@@ -2191,23 +2193,34 @@ const SCRAMBLE={
   ranks:[{s:0,t:'FIRST TOSS'},{s:40,t:'LOLLY LOBBER'},{s:100,t:'GALA DAY REGULAR'},{s:200,t:'CROWD PLEASER'},{s:350,t:'FAIR SHARE HERO'},{s:550,t:'PARTY LEGEND'},{s:800,t:'SCRAMBLE SAINT'}],
   KID_Y:532, THROW_X:W/2, THROW_Y:172, MAX_KIDS:5,
   // S2 pressure knobs (owner-directed, 2026-07-22, D24 direction-known-harder — PROVISIONAL,
-  // tune with par at 6.5): steeper decay ramp (was 1.9), shorter stages (was 10s). No layout
-  // change — S1 (arrivals) is a separate, still-open unit pending the slot-model decision (§7).
+  // tune with par at 6.5): steeper decay ramp (was 1.9), shorter stages (was 10s).
   DECAY_BASE:6.5, DECAY_GROWTH:2.8, STAGE_INTERVAL:7,
   THROW_GAIN:34, SCORE_RATE:5.0,
   FAIR_FLOOR:60, FAIR_BAND:20,
   CRY_TIME:1.4, PITY:42,
+  // S1 arrivals — walk-in queue over the SAME five fixed slots (D35, owner-directed).
+  // A kid who holds FULL_THRESH for FULL_HOLD walks off HAPPY (frees a slot, never a life —
+  // that path must stay distinct from kidEmpty()'s cry); LEAVE_TIME is both the walk-off
+  // animation and the gap before that slot can refill. Slots refill at every stage boundary
+  // AND once mid-stage at MID_WAKE_AT of the interval, so arrivals keep coming all run.
+  // MIN_ON_FIELD floors the crowd so a well-fed board can't empty itself.
+  // No RNG in either path — arrivals/departures add NO seeded draw site (§3 determinism).
+  // Sim-picked (headless, competent bot): 92/2.6 fired ~0 times a run — the mechanic never
+  // showed; 88/1.8 lands ~5–7 departures and ~9 arrivals in a ~55s run, so the queue keeps
+  // flowing all run without becoming a revolving door.
+  FULL_THRESH:88, FULL_HOLD:1.8, LEAVE_TIME:1.2, // PROVISIONAL — magnitudes wait on 6.5 telemetry (D24)
+  MID_WAKE_AT:0.55, MIN_ON_FIELD:2,              // PROVISIONAL
   init(){
     const xs=[44,112,180,248,316];
     const cols=['#ff6a8a','#4aa3ff','#ffd24a','#5fe89a','#c89aff'];
     this.kids=xs.map((x,i)=>({
-      x, i, active:i<4, haul:i<4?70:0, // R1: start 4 active (indices 0–3)
+      x, i, active:i<3, haul:i<3?70:0, // S1/D35: start 3 active (indices 0–2); 3 and 4 walk in
       decayMul:0.7+srnd(this)*0.9, away:0, bob:Math.random()*Math.PI*2, // S2: wider spread (was 0.8–1.4) — PROVISIONAL
-      color:cols[i], happy:0,
+      color:cols[i], happy:0, fullT:0, leaveT:0,
     }));
     this.lollies=[];
     this.decay=this.DECAY_BASE;
-    this.stage=0; this.stageT=0;
+    this.stage=0; this.stageT=0; this.midWoke=false;
     this.lives=3; this.score=0; this.throws=0;
     this.fairShare=false; this.throwArm=0;
     this.timeScale=1; this.shake=0; this.banner=null;
@@ -2239,11 +2252,28 @@ const SCRAMBLE={
     sBad(); buzz(70); this.shake=10;
     if(this.onOver) this.onOver();
   },
+  // S1/D35 — a kid fed to contentment leaves HAPPY. Frees the slot for the walk-in queue.
+  // Deliberately NOT kidEmpty(): no life, no cry face, gold/green feedback, no shake.
+  kidLeaves(k){
+    k.active=false; k.haul=0; k.fullT=0; k.happy=0; k.away=0; k.leaveT=this.LEAVE_TIME;
+    burst(k.x,this.KID_Y-10,'#5fe89a',12,3);
+    pop('FULL UP!',k.x,this.KID_Y-44,'#ffd24a',6);
+    sGold(); buzz(18);
+  },
+  // S1/D35 — the walk-in. Lowest free slot that isn't still playing its walk-off, so a
+  // vacated slot always sits empty for LEAVE_TIME first. Deterministic on purpose: no
+  // srnd/Math.random here, so arrival count (which tracks player pace) adds no seeded
+  // draw site and the daily's fixed-count init draws stay untouched (§3).
+  wakeKid(){
+    const s=this.kids.find(k=>!k.active&&k.leaveT<=0);
+    if(!s) return false;
+    s.active=true; s.haul=60; s.fullT=0; s.away=0; s.happy=1; s.leaveT=0; // haul 60 = R1 precedent
+    burst(s.x,this.KID_Y-10,s.color,10,2.8); pop('HI!',s.x,this.KID_Y-44,s.color,6);
+    return true;
+  },
   stageUp(){
     this.stage++; this.decay+=this.DECAY_GROWTH;
-    let woke=false;
-    const s2=this.kids.find(k=>!k.active); // R1: wake ANY inactive kid (5th arrives at first stage-up)
-    if(s2){ s2.active=true; s2.haul=60; woke=true; }
+    const woke=this.wakeKid(); // R1: wake ANY inactive kid — now also refills departed slots
     this.kids.forEach(k=>{ if(k.active&&k.away<=0) k.haul=Math.min(100,k.haul+16); });
     this.timeScale=0.4;
     this.banner={t:woke?'NEW KID!':'HUNGRIER!',life:1.4};
@@ -2256,13 +2286,23 @@ const SCRAMBLE={
     if(this.throwArm>0) this.throwArm-=dt*4;
     if(this.st==='play'){
       this.stageT+=dt;
-      if(this.stageT>=this.STAGE_INTERVAL){ this.stageT=0; this.stageUp(); }
+      if(this.stageT>=this.STAGE_INTERVAL){ this.stageT=0; this.midWoke=false; this.stageUp(); }
+      else if(!this.midWoke&&this.stageT>=this.STAGE_INTERVAL*this.MID_WAKE_AT){
+        this.midWoke=true; // S1/D35: one extra arrival mid-stage if a slot is open
+        if(this.wakeKid()){ this.banner={t:'NEW KID!',life:1.2}; sStage(); }
+      }
       this.kids.forEach(k=>{
+        if(k.leaveT>0) k.leaveT-=dt*this.timeScale; // walk-off + refill gap (runs while inactive)
         if(!k.active) return;
         if(k.away>0){ k.away-=dt*this.timeScale; if(k.away<=0) k.haul=this.PITY; return; }
         k.haul-=this.decay*k.decayMul*dt*this.timeScale;
         if(k.happy>0) k.happy-=dt*2;
-        if(k.haul<=0){ k.haul=0; this.kidEmpty(k); }
+        if(k.haul<=0){ k.haul=0; this.kidEmpty(k); return; }
+        // S1/D35 — sustained contentment ⇒ happy departure (never a life; see kidLeaves)
+        if(k.haul>=this.FULL_THRESH){
+          k.fullT+=dt*this.timeScale;
+          if(k.fullT>=this.FULL_HOLD&&this.activeKids().length>this.MIN_ON_FIELD) this.kidLeaves(k);
+        } else k.fullT=0;
       });
       this.lollies.forEach(l=>{
         l.t+=dt*2.2*this.timeScale; // ~0.45s flight
@@ -2299,15 +2339,33 @@ const SCRAMBLE={
     if(this.banner){ this.banner.life-=0.016; if(this.banner.life<=0) this.banner=null; }
   },
   drawKid(k){
-    const kx=k.x, ky=this.KID_Y, OUT='#140a12';
+    const kx=k.x, ky=this.KID_Y;
     if(!k.active){
+      if(k.leaveT>0){ // S1/D35 walk-off — a fed kid strolls off happy (NOT the cry idiom)
+        const f=1-Math.max(0,k.leaveT)/this.LEAVE_TIME, dir=kx<W/2?-1:1;
+        ctx.save(); ctx.globalAlpha=Math.max(0,1-f*f);
+        // drifts out AND forward (toward the viewer) so it never reads as the neighbour's slot
+        this.drawKidBody(k,kx+dir*30*f,ky+f*14-Math.abs(Math.sin(f*Math.PI*3))*5,true);
+        ctx.restore(); return;
+      }
       ctx.save(); ctx.globalAlpha=0.13; ctx.setLineDash([4,4]);
       ctx.strokeStyle='#fff'; ctx.lineWidth=2;
       ctx.beginPath(); ctx.arc(kx,ky-6,15,0,Math.PI*2); ctx.stroke();
       ctx.setLineDash([]); ctx.restore(); return;
     }
-    const away=k.away>0, worried=k.haul<30, bob=Math.sin(k.bob)*2;
-    ctx.save(); ctx.translate(kx,ky+bob); ctx.globalAlpha=away?0.45:1;
+    this.drawKidBody(k,kx,ky,false);
+    // haul meter — floats above the head so the ground stays clear
+    const bw=40, bx=kx-bw/2, by=ky-46;
+    rr(bx-1,by-1,bw+2,7,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    const f=Math.max(0,Math.min(1,k.haul/100));
+    ctx.fillStyle=k.haul>=60?'#5fe89a':(k.haul>=30?'#ffd24a':'#ff5a4a');
+    rr(bx,by,Math.max(0,bw*f),5,2); ctx.fill();
+    if(this.fairShare){ ctx.save(); ctx.globalAlpha=0.5+0.4*Math.sin(tick*0.2); ctx.strokeStyle='#ffd24a'; ctx.lineWidth=1.5; rr(bx-1,by-1,bw+2,7,3); ctx.stroke(); ctx.restore(); }
+  },
+  drawKidBody(k,kx,ky,leaving){
+    const OUT='#140a12';
+    const away=!leaving&&k.away>0, worried=!leaving&&k.haul<30, bob=Math.sin(k.bob)*2;
+    ctx.save(); ctx.translate(kx,ky+bob); ctx.globalAlpha*=away?0.45:1;
     ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0,28,15,4,0,0,Math.PI*2); ctx.fill();
     rr(-8,14,16,14,4); ctx.fillStyle=OUT; ctx.fill();
     rr(-7,15,6,11,3); ctx.fillStyle='#2a2438'; ctx.fill();
@@ -2326,20 +2384,13 @@ const SCRAMBLE={
       ctx.fillStyle='#fff'; ctx.fillRect(-6,-18,5,5); ctx.fillRect(2,-18,5,5);
       ctx.fillStyle='#111'; ctx.fillRect(worried?-6:-4,-17,3,3); ctx.fillRect(worried?4:3,-17,3,3);
       ctx.strokeStyle='#7a1020'; ctx.lineWidth=1.5; ctx.beginPath();
-      if(k.haul>=60) ctx.arc(0,-11,4,0.15*Math.PI,0.85*Math.PI);
+      if(leaving||k.haul>=60) ctx.arc(0,-11,4,0.15*Math.PI,0.85*Math.PI); // walk-off always smiles
       else if(worried) ctx.arc(0,-6,4,1.15*Math.PI,1.85*Math.PI);
       else { ctx.moveTo(-3,-9); ctx.lineTo(3,-9); }
       ctx.stroke();
       if(k.happy>0){ ctx.save(); ctx.globalAlpha=k.happy; ctx.fillStyle='#fff'; ctx.fillRect(9,-25,2,2); ctx.fillRect(-11,-23,2,2); ctx.restore(); }
     }
     ctx.restore();
-    // haul meter — floats above the head so the ground stays clear
-    const bw=40, bx=kx-bw/2, by=ky-46;
-    rr(bx-1,by-1,bw+2,7,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
-    const f=Math.max(0,Math.min(1,k.haul/100));
-    ctx.fillStyle=k.haul>=60?'#5fe89a':(k.haul>=30?'#ffd24a':'#ff5a4a');
-    rr(bx,by,Math.max(0,bw*f),5,2); ctx.fill();
-    if(this.fairShare){ ctx.save(); ctx.globalAlpha=0.5+0.4*Math.sin(tick*0.2); ctx.strokeStyle='#ffd24a'; ctx.lineWidth=1.5; rr(bx-1,by-1,bw+2,7,3); ctx.stroke(); ctx.restore(); }
   },
   drawThrower(){
     const OUT='#140a12', p=this.pal();
