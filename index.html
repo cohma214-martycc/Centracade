@@ -69,6 +69,9 @@ const PALS=[
  {top:'#0a0f24',bot:'#121a3a',ring:'#5a7cff',acc:'#3048c8',glow:'#6a8cff',sky:'#141e4a'}, // 7 TAZO — electric holo blue (hue unspecified in spec)
  {top:'#1c0e04',bot:'#2c1808',ring:'#ffab4e',acc:'#d6841e',glow:'#ff9a30',sky:'#3a220c'}, // 8 DAIRY — warm caramel pie-warmer
  {top:'#040e1c',bot:'#08182e',ring:'#ff5a6a',acc:'#c02840',glow:'#ff4458',sky:'#0a2038'}, // 9 WEAVER — navy hull + red-sock accent
+ // Phase 7.5. Appending is safe BY DESIGN: CHATTER cycles an explicit index list
+ // (CHATTER_PALS), not a modulo over PALS.length, so new rows can't recolour it.
+ {top:'#180622',bot:'#260a36',ring:'#ff6ae0',acc:'#c02cae',glow:'#ff44d8',sky:'#341046'}, // 10 RECALL — dial-up magenta (~310°, the largest unused hue gap in the set)
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -446,6 +449,15 @@ const SKINS={
         ready:['DRAG FROM A RED BOLLARD','THREAD EVERY KNOT ONCE','FOLLOW ROPES · NEVER CROSS','DODGE SPY BOATS AND FLARES'],
         over:'THE THREAD SNAPPED', knitted:'KNITTED!', snapped:'SNAPPED!', threadSnapped:'THREAD SNAPPED!',
         shareIcon:'🧶', shareLabel:'jersey knit',
+      },
+      // Phase 7.5 — built pack-native (D38): no display string ever lived in the
+      // game object. Theme = the dial-up handshake (D43, brand-free per D15).
+      recall:{
+        name:'RECALL', tag:'REPEAT THE HANDSHAKE',
+        ranks:['ENGAGED TONE','DIAL TONE','HANDSHAKE','NEGOTIATING','CONNECTED','56K FLAT OUT'],
+        ready:['WATCH THE LINE NEGOTIATE','TAP THE TONES BACK IN ORDER','ONE MORE TONE EVERY ROUND'],
+        over:'CONNECTION LOST', clear:'HANDSHAKE!', miss:'LINE NOISE!',
+        shareIcon:'📞', shareLabel:'dial-up',
       },
     },
   },
@@ -3506,16 +3518,240 @@ const WEAVER={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  RECALL  (Phase 7.5 — the memory verb; nz90 theme: the dial-up handshake)
+// ════════════════════════════════════════════════════════════════
+//  DETERMINISM (§3) — read before adding ANY srnd() call here.
+//  The sequence is ONE GROWING PREFIX of one seeded stream: init() draws item 1,
+//  each cleared round appends exactly one more, and a miss/replay consumes
+//  NOTHING. So two players on the same daily share the sequence byte-for-byte —
+//  skill changes how FAR down it they get, never what it is. That is stronger
+//  than "fixed count per round", and it is fragile: a per-round decoy, shuffle
+//  or distractor draw would make consumption depend on the player again, which
+//  is the WEAVER B1 bug wearing a different hat. One draw per round. That's it.
+//
+//  Tap-only (no press) — keeps zero-latency tap-on-pointerdown, so B6 doesn't apply.
+//  The channel is VISUAL: pad tones are reinforcement only, and a full run must be
+//  playable with arc_mute on (rule 5) — the lit pad carries the whole sequence.
+const RECALL={
+  id:'recall', // name/tag: skin pack
+  bestKey:'arc_recall_best',
+  // PROVISIONAL — a cleared round of length n always banks exactly n², so par 400
+  // ≈ reaching round 10. Real number comes from the single all-15 retune (D41).
+  par:400,
+  ranks:[{s:0},{s:60},{s:180},{s:400},{s:750},{s:1200}], // thresholds only — titles from the pack (rule 12)
+  PAL_I:10,
+  // Ring geometry lifted from CHATTER (rule 9): 5 slots at 72°, first at -54° so
+  // no pad sits at the very top of the ring where the brand tag lives.
+  CX:W/2, CY:288, PADS:5, RING_R:100, PAD_R:26, HIT_R:34,
+  TONES:[392,494,587,698,880], // reinforcement only — never the sole channel
+  // Playback interval SHRINKS with length to a floor. Without the floor, watch
+  // time grows quadratically and round 14 is a ~9s spectate (§7 watch item).
+  PB_BASE:0.62, PB_STEP:0.03, PB_FLOOR:0.26, PB_LIT:0.62, PB_LEAD:0.5, // PROVISIONAL
+  CLEAR_TIME:0.75, MISS_TIME:1.0,                                      // PROVISIONAL
+  FLUENT_GAP:0.55, RECITE_MULT:0.5, // RECITE ×1.5 = the round's bank + 0.5× it    // PROVISIONAL
+  init(){
+    this.slots=[];
+    for(let i=0;i<this.PADS;i++){ const deg=-54+i*72; this.slots.push({angle:deg*Math.PI/180}); }
+    this.seq=[this.rollPad()];              // draw #1 — see the determinism note above
+    this.phase='lead'; this.phaseT=this.PB_LEAD;
+    this.pbIdx=0; this.pbT=0;
+    this.inIdx=0;
+    // Watermark: the deepest index already banked THIS round. A replay re-walks
+    // known items for free, so failing late can't double-bank them (the exploit
+    // the plan flagged). Consequence: a cleared round always pays exactly n².
+    this.deepest=0;
+    this.lit=-1; this.litT=0;
+    this.lastTapAt=0; this.fluent=true;
+    this.lives=3; this.score=0; this.rounds=0;
+    this.banner=null; this.shake=0; this.rejectAt=0;
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[this.PAL_I]; },
+  rollPad(){ return Math.floor(srnd(this)*this.PADS); },
+  interval(){ return Math.max(this.PB_FLOOR, this.PB_BASE-this.PB_STEP*(this.seq.length-1)); },
+  padPos(i){ const s=this.slots[i]; return {x:this.CX+Math.cos(s.angle)*this.RING_R, y:this.CY+Math.sin(s.angle)*this.RING_R}; },
+  padAt(x,y){
+    for(let i=0;i<this.PADS;i++){ const p=this.padPos(i); if(Math.hypot(x-p.x,y-p.y)<=this.HIT_R) return i; }
+    return -1;
+  },
+  padTone(i){ beep(this.TONES[i],0.10,'square',0.045); },
+  bump(){ if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); } },
+  start(){ this.st='play'; },
+  playStep(){
+    const iv=this.interval();
+    this.pbT=iv; this.lit=this.seq[this.pbIdx]; this.litT=iv*this.PB_LIT;
+    this.padTone(this.lit);
+  },
+  update(dt){
+    if(this.banner){ this.banner.life-=dt; if(this.banner.life<=0) this.banner=null; }
+    if(this.shake>0) this.shake=Math.max(0,this.shake-dt*22);
+    if(this.litT>0) this.litT-=dt;
+    if(this.st==='ready'){ this.lit=Math.floor(tick/26)%this.PADS; this.litT=0.3; return; } // idle chase
+    if(this.st!=='play') return;
+    if(this.phase==='lead'){
+      this.phaseT-=dt;
+      if(this.phaseT<=0){ this.phase='watch'; this.pbIdx=0; this.playStep(); }
+    } else if(this.phase==='watch'){
+      this.pbT-=dt;
+      if(this.pbT<=0){
+        this.pbIdx++;
+        if(this.pbIdx>=this.seq.length){
+          this.phase='input'; this.inIdx=0; this.lit=-1;
+          this.fluent=true; this.lastTapAt=performance.now(); // first tap is timed from playback end
+        } else this.playStep();
+      }
+    } else if(this.phase==='clear'){
+      this.phaseT-=dt; if(this.phaseT<=0) this.nextRound();
+    } else if(this.phase==='miss'){
+      this.phaseT-=dt;
+      if(this.phaseT<=0){
+        if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
+        else { this.phase='lead'; this.phaseT=this.PB_LEAD; }
+      }
+    }
+  },
+  roundClear(){
+    this.rounds++;
+    const n=this.seq.length;
+    if(this.fluent){
+      const b=Math.round(n*n*this.RECITE_MULT);
+      this.score+=b;
+      pop('+'+b,this.CX,this.CY-40,'#ffd24a',12);
+      this.banner={t:'RECITE ×1.5',life:1.1}; sGold();
+    } else { this.banner={t:S(this.id,'clear'),life:1.0}; sStage(); }
+    this.bump(); buzz(18);
+    burst(this.CX,this.CY,this.pal().ring,22,3.2);
+    this.phase='clear'; this.phaseT=this.CLEAR_TIME;
+  },
+  nextRound(){
+    this.seq.push(this.rollPad());   // exactly ONE draw per round — see the header note
+    this.inIdx=0; this.deepest=0;
+    this.phase='lead'; this.phaseT=this.PB_LEAD;
+  },
+  miss(){
+    this.lives--; this.shake=9; sBad(); buzz(90);
+    this.banner={t:S(this.id,'miss'),life:1.1};
+    const p=this.padPos(this.seq[this.inIdx]);
+    burst(p.x,p.y,'#ff5a5a',16,2.8);
+    this.inIdx=0; this.fluent=false;  // deepest PERSISTS across the replay (no re-bank)
+    this.phase='miss'; this.phaseT=this.MISS_TIME;
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // Taps while the line is playing back, or during the clear/miss beat, are FREE
+    // no-ops with a soft reject — never a miss, never a life (§9).
+    if(this.phase!=='input'){ this.rejectAt=performance.now(); return; }
+    const i=this.padAt(x,y);
+    if(i<0){ this.rejectAt=performance.now(); return; }              // off-pad = free no-op
+    const now=performance.now();
+    if(now-this.lastTapAt>this.FLUENT_GAP*1000) this.fluent=false;
+    this.lastTapAt=now;
+    this.lit=i; this.litT=0.18; this.padTone(i);
+    if(i!==this.seq[this.inIdx]){ this.miss(); return; }
+    if(this.inIdx>=this.deepest){ this.deepest=this.inIdx+1; this.score+=this.seq.length; this.bump(); }
+    const p=this.padPos(i); burst(p.x,p.y,this.pal().glow,7,2.2); buzz(6);
+    this.inIdx++;
+    if(this.inIdx>=this.seq.length) this.roundClear();
+  },
+  drawModem(){
+    const p=this.pal();
+    ctx.save(); ctx.translate(this.CX,this.CY);
+    rr(-30,-16,60,32,6); ctx.fillStyle='#1a1016'; ctx.fill();
+    ctx.strokeStyle=p.acc; ctx.lineWidth=2; rr(-30,-16,60,32,6); ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1.5;
+    for(let i=0;i<3;i++){ ctx.beginPath(); ctx.moveTo(-23,-7+i*7); ctx.lineTo(-7,-7+i*7); ctx.stroke(); }
+    const neg=this.phase==='lead'||this.phase==='watch';
+    for(let i=0;i<3;i++){
+      const on = this.st!=='play' ? i===0 : (neg ? (tick+i*5)%18<9 : this.phase==='input'&&i<2);
+      ctx.beginPath(); ctx.arc(6+i*10,-6,3,0,Math.PI*2);
+      if(on){ ctx.shadowColor=p.glow; ctx.shadowBlur=8; ctx.fillStyle=i===2?'#ff5a5a':p.ring; }
+      else { ctx.fillStyle='rgba(255,255,255,0.14)'; }
+      ctx.fill(); ctx.shadowBlur=0;
+    }
+    ctx.restore();
+  },
+  drawPad(i){
+    const pos=this.padPos(i), p=this.pal();
+    const on=this.lit===i&&this.litT>0;
+    ctx.save(); ctx.translate(pos.x,pos.y);
+    ctx.beginPath(); ctx.arc(0,0,this.PAD_R,0,Math.PI*2);
+    ctx.fillStyle=on?p.acc:'rgba(255,255,255,0.05)'; ctx.fill();
+    if(on){ ctx.shadowColor=p.glow; ctx.shadowBlur=18; }
+    ctx.strokeStyle=on?p.ring:'rgba(255,255,255,0.28)'; ctx.lineWidth=on?3:2;
+    ctx.beginPath(); ctx.arc(0,0,this.PAD_R,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
+    // inner mark — a drawn waveform arc so a lit pad reads without colour alone
+    ctx.strokeStyle=on?'#fff':'rgba(255,255,255,0.3)'; ctx.lineWidth=on?2.5:1.5;
+    ctx.beginPath();
+    for(let k=-10;k<=10;k++){ const yy=Math.sin(k*0.45+(on?tick*0.3:0))*(on?6:3); if(k===-10) ctx.moveTo(k,yy); else ctx.lineTo(k,yy); }
+    ctx.stroke();
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('ROUND '+this.seq.length,W/2,128);
+    // ring
+    ctx.save(); ctx.globalAlpha=0.18; ctx.strokeStyle=p.ring; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(this.CX,this.CY,this.RING_R,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    this.drawModem();
+    for(let i=0;i<this.PADS;i++) this.drawPad(i);
+    drawFX();
+    // phase readout + progress pips (the visual channel — legible with audio off)
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"';
+    const listening=this.phase==='lead'||this.phase==='watch';
+    ctx.fillStyle=listening?'rgba(255,255,255,0.55)':p.ring;
+    if(this.st==='play') ctx.fillText(listening?'LISTEN':'REPEAT',W/2,432);
+    if(this.st==='play'){
+      const n=this.seq.length, pipW=Math.min(14,(W-120)/n);
+      for(let k=0;k<n;k++){
+        const px=W/2-(n*pipW)/2+k*pipW+pipW/2;
+        const done=this.phase==='input'?k<this.inIdx:(this.phase==='watch'&&k<=this.pbIdx);
+        ctx.globalAlpha=done?1:0.22; ctx.fillStyle=done?p.ring:'#fff';
+        rr(px-pipW*0.3,448,pipW*0.6,5,2); ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    }
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='11px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,150); ctx.restore(); }
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,this.name,S(this.id,'ready'));
+    if(this.st==='over') drawOverScreen(p,S(this.id,'over'),this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'ROUND '+this.seq.length+' · '+this.rounds+' CLEARED');
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER]; // daily order (the TUCK SHOP RUN sequence) — §5.6: HOWLER after SCAN, GUNGE after SWINGBALL, TAZO after CHATTER, DAIRY after SCRAMBLE, WEAVER last
+// Menu/card order. NOT the daily order any more: since D33 the daily is a day-seeded
+// SHUFFLE of a DAILY_PICK subset, so this array's order no longer paces a run — it
+// paces the MENU. RECALL is therefore appended rather than slotted mid-array: at 11
+// games the last page held 3 cards and one gap, so appending fills that gap and moves
+// no existing card off its page or position (7.5 checklist item 6).
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL];
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
@@ -3540,7 +3776,11 @@ function dailyNumber(){ return Math.floor((Date.parse(dayKeyOf(new Date()))-Date
 // D33: the daily draws DAILY_PICK of GAMES.length, not the whole roster (was 11/11 — over the
 // 5-10 min target, §7). Per-day independent shuffle (stateless — coverage is statistical, not a
 // guaranteed rolling cycle; that was an explicit build choice, not an oversight).
-const DAILY_PICK=6;
+// D37 (7.5): 6 → 5 alongside the first new game. A growing roster at 6/day overruns
+// the 5–10 min target; 5 holds it and gives a 5-line receipt. Per-game appearance
+// rate drops (~55% at 6-of-11 → ~42% at 5-of-12 → ~33% at 5-of-15) — variety over
+// familiarity, accepted. Retune from telemetry at the all-15 par pass (D41).
+const DAILY_PICK=5;
 function pickDailyGames(dayKey){
   // §3 determinism: fixed-count draw (one shuffle of a fixed-size array) off a stream salted
   // 'daily-select' — SEPARATE from the per-game seed (mulberry32(seedBase+idx*101) below), so
@@ -3953,6 +4193,20 @@ function drawMenuIcon(g,cx,cy){
       ctx.fillStyle=(i<=1||i===3||i===4)?s.acc:'#3a4d68'; ctx.fill();
       ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(k[0],k[1],i===0?4:3,0,Math.PI*2); ctx.stroke();
     });
+  } else if(g.id==='recall'){
+    // the five-pad ring mid-playback, one tone lit, modem LEDs below (rule 4)
+    const s=PALS[10];
+    for(let i=0;i<5;i++){
+      const a=(-54+i*72)*Math.PI/180, px=Math.cos(a)*22, py=-2+Math.sin(a)*22, on=i===1;
+      ctx.beginPath(); ctx.arc(px,py,on?7:5.5,0,Math.PI*2);
+      ctx.fillStyle=on?s.acc:'rgba(255,255,255,0.06)'; ctx.fill();
+      if(on){ ctx.shadowColor=s.glow; ctx.shadowBlur=10; }
+      ctx.strokeStyle=on?s.ring:'rgba(255,255,255,0.35)'; ctx.lineWidth=on?2.5:1.5;
+      ctx.beginPath(); ctx.arc(px,py,on?7:5.5,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
+    }
+    rr(-11,-9,22,15,3); ctx.fillStyle='#1a1016'; ctx.fill();
+    ctx.strokeStyle=s.acc; ctx.lineWidth=1.5; rr(-11,-9,22,15,3); ctx.stroke();
+    for(let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(-4.5+i*4.5,-2,1.5,0,Math.PI*2); ctx.fillStyle=i<2?s.ring:'rgba(255,255,255,0.2)'; ctx.fill(); }
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
@@ -3984,7 +4238,9 @@ function drawDailyTile(){
   ctx.fillText(dailyName(),cx,r.y+120); ctx.shadowBlur=0;
   ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fillText('DAILY #'+dailyNumber(),cx,r.y+142);
   ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)';
-  ctx.fillText('EVERY GAME · ONE SCORE',cx,r.y+170);
+  // B9: was the stale 'EVERY GAME · ONE SCORE' (false since D33). Fed by the constant
+  // so it can never go stale again — number-fed copy stays inline per 7.0.
+  ctx.fillText(DAILY_PICK+' GAMES · ONE SCORE',cx,r.y+170);
   ctx.fillText('ONE ATTEMPT A DAY',cx,r.y+186);
   if(dailyCache.forfeited){
     ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ff6a8a'; ctx.fillText('ATTEMPT USED',cx,r.y+240);
