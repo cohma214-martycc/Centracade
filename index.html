@@ -459,6 +459,26 @@ const SKINS={
         over:'CONNECTION LOST', clear:'HANDSHAKE!', miss:'LINE NOISE!',
         shareIcon:'📞', shareLabel:'dial-up',
       },
+      // Theme = big sister's diary padlock (D43). Brand-free; D15 sign-off owed.
+      // `diary` is the per-lock reward beat — picked by LOCK INDEX, never by a
+      // seeded draw, so it costs the daily stream nothing (see the game header).
+      lock:{
+        name:'LOCK', tag:'CRACK THE DIARY',
+        ranks:['SHAKING THE LOCK','GUESSING BIRTHDAYS','GETTING WARMER','ONE CLICK OFF','DIARY OPEN','READ THE WHOLE THING'],
+        ready:['TAP A DIAL TO CHANGE THE CHARM','SUBMIT TO TEST THE COMBINATION','GOLD = RIGHT SPOT · RING = WRONG SPOT'],
+        over:'SHE CAME BACK IN', solved:'CLICK!', failed:'JAMMED!',
+        diary:[
+          'MONDAY. NOTHING HAPPENED. AGAIN.',
+          'HE SAID HI TO ME. I NEARLY DIED.',
+          'MUM IS SO UNFAIR. I AM SO SURE.',
+          'TAPED THE TOP 40 OFF THE RADIO.',
+          'BEST FRIENDS FOREVER. PROBABLY.',
+          'GROUNDED. FOR NOTHING. TYPICAL.',
+          'NOBODY IN THIS HOUSE UNDERSTANDS.',
+          'IF YOU ARE READING THIS: GET OUT.',
+        ],
+        shareIcon:'🔒', shareLabel:'diary lock',
+      },
     },
   },
 };
@@ -3737,6 +3757,275 @@ const RECALL={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  LOCK  (Phase 7.5 — the deduction verb; nz90 theme: big sister's diary padlock)
+// ════════════════════════════════════════════════════════════════
+//  DETERMINISM (§3) — same PREFIX property as RECALL, for a different reason.
+//  newLock() draws EXACTLY `slots` numbers, and `slots` is a pure function of the
+//  lock index (3, then 4 from ESCALATE_AT) — never of player behaviour. So the
+//  draws consumed before lock N are the same for everyone, and lock N's code is
+//  shared byte-for-byte; skill only changes how many locks you reach. Guesses
+//  consume NOTHING, and the diary line is chosen by lock index, not a draw.
+//  ⚠ Never seed a hint, a decoy, or the diary line — that reintroduces the
+//  player-dependent consumption that B1 was.
+//
+//  Tap-only (no press). Endless + 3 lives (D39) — a blown guess budget costs one
+//  life and hands you a fresh lock; it never ends the run on its own.
+//  The clock is a BONUS METER only (D3/D19, GUNGE/WEAVER precedent): it drains,
+//  it banks on solve, and hitting 0 never fails the lock or ends the run.
+const LOCK={
+  id:'lock', // name/tag: skin pack
+  bestKey:'arc_lock_best',
+  par:600, // PROVISIONAL — ~75/lock for a competent player ≈ reaching lock 8 (D41 retunes all 15)
+  ranks:[{s:0},{s:120},{s:300},{s:600},{s:1000},{s:1600}], // thresholds only — titles from the pack (rule 12)
+  PAL_I:4, // reuses SCRAMBLE's party pink: diary pink, and the hue wheel is full at 11 (owner may re-call)
+  SYMS:6, SLOTS_BASE:3, SLOTS_MAX:4, ESCALATE_AT:3, // lock 3 onward is 4 slots
+  // Guesses per lock. The 7.5 brief said 5 and 6; BUDGET4 was cut to 5 at build on
+  // sim evidence (all these are // PROVISIONAL by the spec's own terms):
+  //   · 4 dials / 6 guesses is solved 99.4% of the time by a naive consistent
+  //     solver, so a methodical player almost never loses a life → median run
+  //     247 locks ≈ 77 min. That blows the daily's 5–10 min target outright.
+  //   · 4 dials / 5 guesses solves 85.5% → median 20 locks / p90 36 ≈ 6–11 min.
+  // It also fixes an inversion: at 6 guesses the "escalation" to 4 dials was
+  // EASIER than 3 dials (0.6% vs 8.5% failure), the opposite of the brief's
+  // stated intent that escalation is where run-length pressure lives.
+  // Retune from telemetry at D41; do NOT raise this back without new data.
+  BUDGET3:5, BUDGET4:5,
+  CLOCK3:32, CLOCK4:44,          // bonus meter seconds — banked on solve, never fatal
+  PTS_PER_GUESS:10,              // × guessesLeft × slots
+  SOLVED_TIME:2.8, FAILED_TIME:2.3, // PROVISIONAL
+  // Six charms that differ in SHAPE first, hue second — six symbols on a dark
+  // field is exactly where colour-only coding breaks (the TAZO 6.2c ΔE lesson).
+  SYM_COL:['#ff5a7a','#ffd24a','#8affb0','#9ad8ff','#ffa64a','#c88aff'],
+  GY:422, GW:44, GGAP:12,        // current-guess row
+  HY:172, HROW:38, HW:24, HGAP:8, HX:58, PEGX:206, // history rows
+  init(){
+    this.lockNo=1;
+    this.lives=3; this.score=0; this.solved=0;
+    this.banner=null; this.shake=0; this.rejectAt=0; this.diaryIdx=0;
+    this.newLock();
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[this.PAL_I]; },
+  newLock(){
+    this.slots = this.lockNo>=this.ESCALATE_AT ? this.SLOTS_MAX : this.SLOTS_BASE;
+    this.budget = this.slots===3 ? this.BUDGET3 : this.BUDGET4;
+    this.code=[];
+    for(let i=0;i<this.slots;i++) this.code.push(Math.floor(srnd(this)*this.SYMS)); // EXACTLY `slots` draws
+    this.guess=new Array(this.slots).fill(0);
+    this.history=[];
+    this.clockMax = this.slots===3 ? this.CLOCK3 : this.CLOCK4;
+    this.clock=this.clockMax;
+    this.phase='play'; this.phaseT=0;
+  },
+  start(){ this.st='play'; },
+  bump(){ if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); } },
+  // Standard Mastermind multiset scoring: exact matches are removed FIRST, then
+  // each remaining guess symbol consumes at most one remaining code symbol. The
+  // naive version double-counts whenever a symbol repeats — spelled out because
+  // that bug is invisible until a repeat shows up.
+  pegs(g){
+    let ex=0; const cc=new Array(this.SYMS).fill(0), gc=new Array(this.SYMS).fill(0);
+    for(let i=0;i<this.slots;i++){
+      if(g[i]===this.code[i]) ex++;
+      else { cc[this.code[i]]++; gc[g[i]]++; }
+    }
+    let pa=0; for(let s=0;s<this.SYMS;s++) pa+=Math.min(cc[s],gc[s]);
+    return {ex,pa};
+  },
+  slotRect(i){
+    const n=this.slots, total=n*this.GW+(n-1)*this.GGAP, x0=(W-total)/2;
+    return {x:x0+i*(this.GW+this.GGAP), y:this.GY, w:this.GW, h:this.GW};
+  },
+  submitRect(){ return {x:100,y:496,w:160,h:44}; },
+  submit(){
+    if(this.phase!=='play') return;
+    const g=this.guess.slice(), r=this.pegs(g);
+    this.history.push({g,ex:r.ex,pa:r.pa});
+    if(r.ex===this.slots) this.solveLock();
+    else if(this.history.length>=this.budget) this.failLock();
+    else { sHit(); buzz(8); }
+  },
+  solveLock(){
+    const left=this.budget-this.history.length;
+    const gain=left*this.slots*this.PTS_PER_GUESS + Math.floor(Math.max(0,this.clock));
+    this.score+=gain; this.solved++; this.bump();
+    this.diaryIdx=this.lockNo-1;      // by lock INDEX — never a seeded draw
+    this.banner={t:S(this.id,'solved'),life:1.3};
+    pop('+'+gain,W/2,300,'#ffd24a',13);
+    burst(W/2,318,this.pal().ring,24,3.2);
+    sGold(); buzz(22);
+    this.phase='solved'; this.phaseT=this.SOLVED_TIME;
+  },
+  failLock(){
+    this.lives--; this.shake=9; sBad(); buzz(90);
+    this.banner={t:S(this.id,'failed'),life:1.3};
+    this.phase='failed'; this.phaseT=this.FAILED_TIME;
+  },
+  update(dt){
+    if(this.banner){ this.banner.life-=dt; if(this.banner.life<=0) this.banner=null; }
+    if(this.shake>0) this.shake=Math.max(0,this.shake-dt*22);
+    if(this.st!=='play') return;
+    if(this.phase==='play'){
+      // bonus meter only — expiry costs nothing, it just stops paying (D3/D19)
+      if(this.clock>0) this.clock=Math.max(0,this.clock-dt);
+    } else {
+      this.phaseT-=dt;
+      if(this.phaseT<=0){
+        if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
+        else { this.lockNo++; this.newLock(); }   // no draw happens after death
+      }
+    }
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // Taps during the solved/failed beat are free no-ops with a soft reject (§9).
+    if(this.phase!=='play'){ this.rejectAt=performance.now(); return; }
+    if(inR(x,y,this.submitRect())){ this.submit(); return; }
+    for(let i=0;i<this.slots;i++){
+      if(inR(x,y,this.slotRect(i))){
+        this.guess[i]=(this.guess[i]+1)%this.SYMS; sTick(0.03); buzz(6); return;
+      }
+    }
+    this.rejectAt=performance.now();   // anywhere else = free no-op
+  },
+  // ── drawn charms (rule 4) — shape is the primary channel, hue the backup ──
+  drawSym(k,cx,cy,r,dim){
+    ctx.save(); ctx.translate(cx,cy);
+    ctx.fillStyle=this.SYM_COL[k];
+    if(dim) ctx.globalAlpha=0.42;
+    ctx.beginPath();
+    if(k===0){            // heart
+      ctx.moveTo(0,r*0.9);
+      ctx.bezierCurveTo(-r*1.3,r*0.05,-r*0.55,-r*1.0,0,-r*0.32);
+      ctx.bezierCurveTo(r*0.55,-r*1.0,r*1.3,r*0.05,0,r*0.9);
+    } else if(k===1){     // star
+      for(let i=0;i<10;i++){
+        const a=-Math.PI/2+i*Math.PI/5, rad=i%2?r*0.45:r;
+        i?ctx.lineTo(Math.cos(a)*rad,Math.sin(a)*rad):ctx.moveTo(Math.cos(a)*rad,Math.sin(a)*rad);
+      }
+      ctx.closePath();
+    } else if(k===2){     // flower
+      ctx.arc(0,0,r*0.34,0,Math.PI*2);
+      for(let i=0;i<5;i++){
+        const a=-Math.PI/2+i*Math.PI*2/5;
+        ctx.moveTo(Math.cos(a)*r*0.62+r*0.38,Math.sin(a)*r*0.62);
+        ctx.arc(Math.cos(a)*r*0.62,Math.sin(a)*r*0.62,r*0.38,0,Math.PI*2);
+      }
+    } else if(k===3){     // crescent moon
+      ctx.arc(0,0,r,Math.PI*0.42,Math.PI*1.58,false);
+      ctx.arc(-r*0.42,0,r*0.86,Math.PI*1.58,Math.PI*0.42,true);
+      ctx.closePath();
+    } else if(k===4){     // lightning bolt
+      ctx.moveTo(r*0.34,-r); ctx.lineTo(-r*0.6,r*0.16); ctx.lineTo(-r*0.06,r*0.16);
+      ctx.lineTo(-r*0.34,r); ctx.lineTo(r*0.6,-r*0.2); ctx.lineTo(r*0.04,-r*0.2);
+      ctx.closePath();
+    } else {              // diamond
+      ctx.moveTo(0,-r); ctx.lineTo(r*0.72,0); ctx.lineTo(0,r); ctx.lineTo(-r*0.72,0); ctx.closePath();
+    }
+    ctx.fill(); ctx.restore();
+  },
+  drawPegs(n,ex,pa,x,y){
+    for(let i=0;i<n;i++){
+      const px=x+i*13;
+      ctx.beginPath(); ctx.arc(px,y,4.6,0,Math.PI*2);
+      if(i<ex){ ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=7; ctx.fill(); ctx.shadowBlur=0; }
+      else if(i<ex+pa){ ctx.strokeStyle='#ffffff'; ctx.lineWidth=1.8; ctx.stroke(); }
+      else { ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=1.5; ctx.stroke(); }
+    }
+  },
+  drawPadlock(cx,cy,s,open){
+    ctx.save(); ctx.translate(cx,cy); ctx.scale(s,s);
+    ctx.strokeStyle='#d8d8e4'; ctx.lineWidth=3.2; ctx.lineCap='round';
+    ctx.beginPath();
+    if(open) ctx.arc(-3.5,-7,6,Math.PI*0.98,Math.PI*2.1);
+    else ctx.arc(0,-7,6,Math.PI,Math.PI*2);
+    ctx.stroke();
+    if(!open){ ctx.beginPath(); ctx.moveTo(-6,-7); ctx.lineTo(-6,-2); ctx.moveTo(6,-7); ctx.lineTo(6,-2); ctx.stroke(); }
+    rr(-9,-3,18,14,3); ctx.fillStyle=open?'#ffd24a':'#c8a63c'; ctx.fill();
+    ctx.fillStyle='#2a1a22'; ctx.beginPath(); ctx.arc(0,4,2.2,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.fillText('LOCK '+this.lockNo+'  ·  '+this.slots+' DIALS',W/2,128);
+    // BONUS meter (never a terminator — D3/D19)
+    const bx=44, bw=W-88, frac=Math.max(0,Math.min(1,this.clock/this.clockMax));
+    rr(bx-1,139,bw+2,8,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    ctx.fillStyle=frac<0.25?'#ff8a5a':p.ring; rr(bx,140,Math.max(0,bw*frac),6,2); ctx.fill();
+    ctx.textAlign='left'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText('BONUS',bx,135);
+    ctx.textAlign='right'; ctx.fillStyle=p.ring; ctx.fillText('+'+Math.floor(Math.max(0,this.clock)),bx+bw,135);
+    // guesses left
+    ctx.textAlign='center'; ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.fillText((this.budget-this.history.length)+' GUESSES LEFT',W/2,161);
+    // history
+    this.history.forEach((h,i)=>{
+      const y=this.HY+i*this.HROW;
+      for(let k=0;k<h.g.length;k++) this.drawSym(h.g[k],this.HX+k*(this.HW+this.HGAP)+this.HW/2,y+this.HW/2,this.HW*0.42,true);
+      this.drawPegs(h.g.length,h.ex,h.pa,this.PEGX,y+this.HW/2);
+    });
+    // current guess dials
+    if(this.phase==='play'){
+      for(let i=0;i<this.slots;i++){
+        const r=this.slotRect(i);
+        rr(r.x,r.y,r.w,r.h,9); ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fill();
+        ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(r.x,r.y,r.w,r.h,9); ctx.stroke();
+        this.drawSym(this.guess[i],r.x+r.w/2,r.y+r.h/2,r.w*0.32,false);
+      }
+      const sb=this.submitRect();
+      rr(sb.x,sb.y,sb.w,sb.h,10); ctx.fillStyle=p.acc+'55'; ctx.fill();
+      ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(sb.x,sb.y,sb.w,sb.h,10); ctx.stroke();
+      this.drawPadlock(sb.x+28,sb.y+sb.h/2,1.05,false);
+      ctx.fillStyle='#fff'; ctx.font='10px "Press Start 2P"'; ctx.textAlign='left'; ctx.fillText('SUBMIT',sb.x+50,sb.y+sb.h/2+4);
+    }
+    drawFX();
+    // solved / failed beat
+    if(this.phase==='solved'){
+      ctx.save(); ctx.fillStyle='rgba(6,2,8,0.82)'; ctx.fillRect(0,392,W,168);
+      ctx.textAlign='center';
+      this.drawPadlock(W/2,424,1.7,true);
+      const lines=S(this.id,'diary')||[];
+      ctx.font='6px "Press Start 2P"'; ctx.fillStyle='#ffd8e8';
+      ctx.fillText(lines[this.diaryIdx%lines.length]||'',W/2,470);
+      ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText('— HER DIARY —',W/2,492);
+      ctx.restore();
+    } else if(this.phase==='failed'){
+      ctx.save(); ctx.fillStyle='rgba(6,2,8,0.82)'; ctx.fillRect(0,392,W,168);
+      ctx.textAlign='center'; ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)';
+      ctx.fillText('THE COMBINATION WAS',W/2,424);
+      for(let i=0;i<this.slots;i++){
+        const total=this.slots*30, x0=(W-total)/2;
+        this.drawSym(this.code[i],x0+i*30+15,458,12,false);
+      }
+      ctx.restore();
+    }
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='13px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,376); ctx.restore(); }
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,this.name,S(this.id,'ready'));
+    if(this.st==='over') drawOverScreen(p,S(this.id,'over'),this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'LOCK '+this.lockNo+' · '+this.solved+' CRACKED');
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
 // Menu/card order. NOT the daily order any more: since D33 the daily is a day-seeded
@@ -3744,14 +4033,14 @@ const RECALL={
 // paces the MENU. RECALL is therefore appended rather than slotted mid-array: at 11
 // games the last page held 3 cards and one gap, so appending fills that gap and moves
 // no existing card off its page or position (7.5 checklist item 6).
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL];
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL,LOCK];
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10,lock:4};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
@@ -4207,6 +4496,11 @@ function drawMenuIcon(g,cx,cy){
     rr(-11,-9,22,15,3); ctx.fillStyle='#1a1016'; ctx.fill();
     ctx.strokeStyle=s.acc; ctx.lineWidth=1.5; rr(-11,-9,22,15,3); ctx.stroke();
     for(let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(-4.5+i*4.5,-2,1.5,0,Math.PI*2); ctx.fillStyle=i<2?s.ring:'rgba(255,255,255,0.2)'; ctx.fill(); }
+  } else if(g.id==='lock'){
+    // the diary padlock over three charm dials — reuses LOCK.drawSym so the card
+    // and the in-game charms can't drift apart (the HOWLER rocket precedent)
+    LOCK.drawPadlock(0,-11,1.7,false);
+    LOCK.drawSym(0,-17,17,7,false); LOCK.drawSym(1,0,17,7,false); LOCK.drawSym(3,17,17,7,false);
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
