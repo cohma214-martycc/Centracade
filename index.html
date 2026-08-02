@@ -494,6 +494,17 @@ const SKINS={
         stage:'STRIP DONE!', clean:'CLEAN SWEEP!', hit:'CLUNK!',
         shareIcon:'🌱', shareLabel:'the lawns',
       },
+      // Theme = the paper run, depot sort (D43/D44). Brand-free: no masthead is
+      // named anywhere — naming one would pull it into D15. Sign-off owed.
+      chute:{
+        name:'CHUTE', tag:'SORT THE PAPER RUN',
+        ranks:['NEW KID','SATURDAY RELIEF','REGULAR RUN','TWO RUNS A DAY','DEPOT LEGEND','SORTED BEFORE DAWN'],
+        ready:['SWIPE LEFT · DOWN · RIGHT INTO A BAG','EVERY BATCH CHANGES WHAT YOU SORT BY','THE BAGS NEVER MOVE — READ THE CALL'],
+        over:'THE VAN LEFT WITHOUT YOU',
+        crit:['SORT BY MASTHEAD','SORT BY FOLD','SORT BY SIZE'],
+        flip:'NEW CALL', wrong:'WRONG BAG!', missed:'MISSED IT!',
+        shareIcon:'📰', shareLabel:'paper run',
+      },
     },
   },
 };
@@ -4286,6 +4297,275 @@ const ROUND={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  CHUTE  (Phase 7.5 — the rule-switching verb; nz90 theme: the paper run)
+// ════════════════════════════════════════════════════════════════
+//  DETERMINISM (§3) — the stage's whole item list is PRE-GENERATED at stage start
+//  with exactly 3 draws per item (colour, fold, size) × itemCount(stage). Nothing
+//  is drawn while items stream, so a fast sorter and a slow one consume the same
+//  numbers: draws before stage N are a pure function of N. Same prefix property
+//  as RECALL / LOCK / ROUND. The CRITERION is derived (stage % 3), never drawn.
+//  ⚠ Streaming draws per arrival — SCAN's accepted exemption — is deliberately
+//  NOT inherited here; the brief calls for the Nth-draw-safe form.
+//
+//  D42 — THE FLIP IS THE CRITERION, NEVER THE MAPPING OR THE LABELS.
+//  Each bag has a FIXED identity across all three attributes: bag 0 is
+//  (newsprint, rolled, thin), bag 1 (orange, flat, medium), bag 2 (cyan, bagged,
+//  thick). All three are drawn on every bag at all times; the flip only changes
+//  WHICH attribute is scored, and it is announced ~2s before it takes effect.
+//  No bag ever moves, gets relabelled, or lies. A game that lies about which bin
+//  is which is a reflex game with extra steps, and the roster already has two.
+//
+//  §9 / owner call (2026-08-02): a WRONG bag costs a life AND the streak; an item
+//  that falls through UNSORTED costs the streak only, never a life — a life is
+//  the price of a committed wrong decision, not of hesitation.
+const CHUTE={
+  id:'chute', // name/tag: skin pack
+  bestKey:'arc_chute_best',
+  par:700, // PROVISIONAL — D41 retunes all 15 together
+  ranks:[{s:0},{s:150},{s:350},{s:700},{s:1200},{s:2000}], // thresholds only — titles from the pack (rule 12)
+  PAL_I:7, // reuses TAZO's navy/electric blue: a pre-dawn depot. Owner may re-call.
+  BINS:3, BIN_W:104, BIN_GAP:12, BIN_X0:12, BIN_Y:430, BIN_H:110,
+  MOUTH_Y:196, FALL_Y:404,
+  // The descent IS the timer — no separate bar. Window = (FALL_Y-MOUTH_Y)/speed.
+  FALL_BASE:80, FALL_INC:8, FALL_CAP:150,   // PROVISIONAL
+  ITEMS_BASE:10, ITEMS_INC:2, ITEMS_CAP:18,
+  TELEGRAPH:2.0, DIR_THRESH:30, FLY_TIME:0.24,
+  BASE_PTS:10, STREAK_STEP:6, MULT_CAP:4,   // PROVISIONAL
+  // Colour is itself a scored channel here, so these are chosen for contrast
+  // under colour-vision deficiency: newsprint / orange / cyan, never red+green.
+  COLS:['#f0ece0','#ff8a3a','#4ac8ff'],
+  init(){
+    this.stage=0; this.lives=3; this.score=0; this.streak=0; this.bestStreak=0;
+    this.sorted=0; this.missed=0; this.wrong=0;
+    this.phase='run'; this.phaseT=0;
+    this.flies=[]; this.banner=null; this.shake=0; this.rejectAt=0; this.aim=null;
+    this.genItems(); this.idx=0; this.spawn();
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[this.PAL_I]; },
+  crit(){ return this.stage%this.BINS; },            // derived — never a draw
+  nextCrit(){ return (this.stage+1)%this.BINS; },
+  itemCount(){ return Math.min(this.ITEMS_CAP,this.ITEMS_BASE+this.stage*this.ITEMS_INC); },
+  fallSpeed(){ return Math.min(this.FALL_CAP,this.FALL_BASE+this.stage*this.FALL_INC); },
+  // EXACTLY 3 draws per item. Nothing else in the game touches the stream.
+  genItems(){
+    const n=this.itemCount();
+    this.items=[];
+    for(let i=0;i<n;i++){
+      const c=Math.floor(srnd(this)*this.BINS);      // draw 1 — masthead colour
+      const sh=Math.floor(srnd(this)*this.BINS);     // draw 2 — fold
+      const sz=Math.floor(srnd(this)*this.BINS);     // draw 3 — size
+      this.items.push({c,sh,sz});
+    }
+  },
+  spawn(){
+    this.cur = this.idx<this.items.length ? {...this.items[this.idx], y:this.MOUTH_Y} : null;
+  },
+  correctBin(it){ const k=this.crit(); return k===0?it.c:(k===1?it.sh:it.sz); },
+  mult(){ return Math.min(this.MULT_CAP,1+Math.floor(this.streak/this.STREAK_STEP)); },
+  binRect(i){ return {x:this.BIN_X0+i*(this.BIN_W+this.BIN_GAP),y:this.BIN_Y,w:this.BIN_W,h:this.BIN_H}; },
+  binCX(i){ const r=this.binRect(i); return r.x+r.w/2; },
+  start(){ this.st='play'; },
+  bump(){ if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); } },
+  advance(){
+    this.idx++;
+    if(this.idx>=this.items.length){                 // batch done → telegraph the flip
+      this.cur=null; this.phase='telegraph'; this.phaseT=this.TELEGRAPH;
+      this.banner=null; sStage();
+    } else this.spawn();
+  },
+  toss(it,bin,ok){
+    this.flies.push({...it,x:W/2,y:it.y,tx:this.binCX(bin),ty:this.BIN_Y+26,t:0,ok});
+  },
+  sortInto(bin){
+    const it=this.cur; if(!it) return;
+    const want=this.correctBin(it);
+    this.toss(it,bin,bin===want);
+    if(bin===want){
+      const g=this.BASE_PTS*this.mult();
+      this.score+=g; this.streak++; this.sorted++;
+      if(this.streak>this.bestStreak) this.bestStreak=this.streak;
+      this.bump();
+      pop('+'+g,this.binCX(bin),this.BIN_Y-14,'#eaffd0',10);
+      sHit(); buzz(6);
+    } else {
+      this.streak=0; this.wrong++; this.lives--; this.shake=9;
+      this.banner={t:S(this.id,'wrong'),life:1.1};
+      burst(this.binCX(bin),this.BIN_Y+10,'#ff5a5a',14,2.4);
+      sBad(); buzz(90);
+      if(this.lives<=0){ this.cur=null; this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); return; }
+    }
+    this.advance();
+  },
+  fallThrough(){
+    // owner call: costs the STREAK, never a life (§9 — hesitation isn't a decision)
+    const it=this.cur; if(!it) return;
+    this.streak=0; this.missed++;
+    this.banner={t:S(this.id,'missed'),life:1.0};
+    pop('STREAK LOST',W/2,this.FALL_Y-8,'#ffb04a',8);
+    sTick(0.05);
+    this.advance();
+  },
+  update(dt){
+    if(this.banner){ this.banner.life-=dt; if(this.banner.life<=0) this.banner=null; }
+    if(this.shake>0) this.shake=Math.max(0,this.shake-dt*22);
+    this.flies.forEach(f=>f.t+=dt/this.FLY_TIME);
+    this.flies=this.flies.filter(f=>f.t<1);
+    if(this.st!=='play') return;
+    if(this.phase==='telegraph'){
+      this.phaseT-=dt;
+      if(this.phaseT<=0){
+        this.stage++; this.genItems(); this.idx=0; this.phase='run'; this.spawn();
+        this.banner={t:S(this.id,'crit')[this.crit()],life:1.4};
+      }
+      return;
+    }
+    if(this.cur){
+      this.cur.y+=this.fallSpeed()*dt;
+      if(this.cur.y>=this.FALL_Y) this.fallThrough();
+    }
+  },
+  // ── pointer stream (D12): press + release, no drag (TAZO's primitive) ──
+  press(x,y){ this.aim={x0:x,y0:y}; },
+  release(x,y){
+    const a=this.aim; this.aim=null;
+    if(!a||this.st!=='play') return;                       // pointercancel lands here too
+    if(!this.cur||this.phase!=='run'){ this.rejectAt=performance.now(); sTick(0.02); return; } // §9 free no-op
+    const dx=x-a.x0, dy=y-a.y0;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<this.DIR_THRESH){ this.rejectAt=performance.now(); sTick(0.02); return; }
+    if(Math.abs(dy)>Math.abs(dx)){
+      if(dy<0){ this.rejectAt=performance.now(); sTick(0.02); return; }  // up = free no-op
+      this.sortInto(1); return;                                          // down = centre bag
+    }
+    this.sortInto(dx>0?2:0);
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // during play the router routes to press/release — never here (D12)
+  },
+  // ── drawn parts (rule 4) ──
+  drawFold(sh,x,y,s,col){
+    ctx.save(); ctx.translate(x,y);
+    ctx.fillStyle=col; ctx.strokeStyle='rgba(0,0,0,0.45)'; ctx.lineWidth=1.5;
+    if(sh===0){            // rolled
+      rr(-s*0.28,-s*0.62,s*0.56,s*1.24,s*0.28); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle='rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.arc(0,-s*0.34,s*0.2,0,Math.PI*2); ctx.stroke();
+    } else if(sh===1){     // flat-folded
+      rr(-s*0.66,-s*0.44,s*1.32,s*0.88,3); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle='rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.moveTo(0,-s*0.44); ctx.lineTo(0,s*0.44); ctx.stroke();
+    } else {               // bagged
+      rr(-s*0.5,-s*0.3,s,s*0.86,4); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s*0.3,-s*0.3); ctx.lineTo(-s*0.16,-s*0.66);
+      ctx.lineTo(s*0.16,-s*0.66); ctx.lineTo(s*0.3,-s*0.3); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  },
+  drawSizePips(n,x,y,lit){
+    for(let i=0;i<3;i++){
+      const on=i<=n;
+      rr(x+i*8-11,y-(on?3+i*1.6:2),6,(on?6+i*3.2:4),1.5);
+      ctx.fillStyle=on?(lit?'#fff':'rgba(255,255,255,0.65)'):'rgba(255,255,255,0.16)'; ctx.fill();
+    }
+  },
+  drawItem(it,x,y,scale){
+    // size is a SCORED criterion, so the three must read apart at a glance — a
+    // >2× spread, not a subtle one
+    const s=(11+it.sz*7)*(scale||1);
+    this.drawFold(it.sh,x,y,s,this.COLS[it.c]);
+  },
+  drawBin(i){
+    const r=this.binRect(i), p=this.pal(), k=this.crit();
+    rr(r.x,r.y,r.w,r.h,10); ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fill();
+    ctx.strokeStyle=p.ring; ctx.lineWidth=2; rr(r.x,r.y,r.w,r.h,10); ctx.stroke();
+    const cx=r.x+r.w/2;
+    // every bag shows ALL THREE identities, always (D42) — the active one is lit
+    const hl=(row)=>{
+      if(k!==row) return;
+      ctx.save(); ctx.strokeStyle='#ffd24a'; ctx.lineWidth=2; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=8;
+      rr(r.x+6,r.y+6+row*33,r.w-12,30,6); ctx.stroke(); ctx.restore();
+    };
+    hl(0); hl(1); hl(2);
+    rr(cx-17,r.y+14,34,14,3); ctx.fillStyle=this.COLS[i]; ctx.fill();          // colour
+    ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=1; rr(cx-17,r.y+14,34,14,3); ctx.stroke();
+    this.drawFold(i,cx,r.y+54,17,'rgba(255,255,255,0.82)');                     // fold
+    this.drawSizePips(i,cx,r.y+92,k===2);                                       // size
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p);
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)';
+    ctx.fillText('BATCH '+(this.stage+1)+'  ·  '+(this.idx)+'/'+this.items.length,W/2,128);
+    // the active call — always on screen, never hidden (D42)
+    ctx.font='8px "Press Start 2P"'; ctx.fillStyle='#ffd24a'; ctx.shadowColor='#ffaa00'; ctx.shadowBlur=8;
+    ctx.fillText(S(this.id,'crit')[this.crit()],W/2,150); ctx.shadowBlur=0;
+    // streak
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle=this.streak?p.ring:'rgba(255,255,255,0.3)';
+    ctx.fillText('STREAK '+this.streak+'   ×'+this.mult(),W/2,168);
+    // chute mouth — a funnel, with the next item queued inside it
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(W/2-72,178); ctx.lineTo(W/2-26,this.MOUTH_Y-6);
+    ctx.lineTo(W/2+26,this.MOUTH_Y-6); ctx.lineTo(W/2+72,178); ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.28)'; ctx.lineWidth=2.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(W/2-72,178); ctx.lineTo(W/2-26,this.MOUTH_Y-6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W/2+72,178); ctx.lineTo(W/2+26,this.MOUTH_Y-6); ctx.stroke();
+    ctx.restore();
+    const nxt=this.items[this.idx+1];
+    if(nxt&&this.phase==='run'){
+      ctx.save(); ctx.globalAlpha=0.4; this.drawItem(nxt,W/2,186,0.62); ctx.restore();
+    }
+    // fall line
+    ctx.save(); ctx.globalAlpha=0.35; ctx.setLineDash([4,5]); ctx.strokeStyle='#ff8a5a'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(20,this.FALL_Y); ctx.lineTo(W-20,this.FALL_Y); ctx.stroke(); ctx.restore();
+    // the live item
+    if(this.cur) this.drawItem(this.cur,W/2,this.cur.y,1);
+    // tossed items flying to their bag
+    this.flies.forEach(f=>{
+      const u=f.t, x=f.x+(f.tx-f.x)*u, y=f.y+(f.ty-f.y)*u-Math.sin(u*Math.PI)*26;
+      ctx.save(); ctx.globalAlpha=1-u*0.6; this.drawItem(f,x,y,1-u*0.25); ctx.restore();
+    });
+    for(let i=0;i<this.BINS;i++) this.drawBin(i);
+    drawFX();
+    if(this.phase==='telegraph'&&this.st==='play'){
+      ctx.save(); ctx.fillStyle='rgba(4,6,16,0.72)'; ctx.fillRect(0,200,W,150);
+      ctx.textAlign='center';
+      ctx.font='11px "Press Start 2P"'; ctx.fillStyle='#ffd24a';
+      ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12; ctx.fillText(S(this.id,'flip'),W/2,244); ctx.shadowBlur=0;
+      ctx.font='9px "Press Start 2P"'; ctx.fillStyle='#fff';
+      ctx.fillText(S(this.id,'crit')[this.nextCrit()],W/2,282);
+      ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.55)';
+      ctx.fillText('BAGS STAY PUT',W/2,312);
+      ctx.restore();
+    }
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.10; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='12px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,376); ctx.restore(); }
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,this.name,S(this.id,'ready'));
+    if(this.st==='over') drawOverScreen(p,S(this.id,'over'),this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'BEST STREAK '+this.bestStreak+' · '+this.sorted+' SORTED');
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
 // Menu/card order. NOT the daily order any more: since D33 the daily is a day-seeded
@@ -4293,14 +4573,14 @@ const ROUND={
 // paces the MENU. RECALL is therefore appended rather than slotted mid-array: at 11
 // games the last page held 3 cards and one gap, so appending fills that gap and moves
 // no existing card off its page or position (7.5 checklist item 6).
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL,LOCK,ROUND];
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL,LOCK,ROUND,CHUTE];
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10,lock:4,round:11};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10,lock:4,round:11,chute:7};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
