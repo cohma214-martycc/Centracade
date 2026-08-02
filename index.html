@@ -72,6 +72,10 @@ const PALS=[
  // Phase 7.5. Appending is safe BY DESIGN: CHATTER cycles an explicit index list
  // (CHATTER_PALS), not a modulo over PALS.length, so new rows can't recolour it.
  {top:'#180622',bot:'#260a36',ring:'#ff6ae0',acc:'#c02cae',glow:'#ff44d8',sky:'#341046'}, // 10 RECALL — dial-up magenta (~310°, the largest unused hue gap in the set)
+ // 11 ROUND — lawn green (~120°). Takes the 90°→148° gap, the only one left wider
+ // than 50°, and it happens to be exactly the hue a mowing game wants. Sits between
+ // GUNGE's yellow-lime and SWINGBALL's blue-mint (~30° from each).
+ {top:'#08180a',bot:'#0e2a10',ring:'#5ae85a',acc:'#2ba82b',glow:'#7aff7a',sky:'#123a14'},
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -478,6 +482,17 @@ const SKINS={
           'IF YOU ARE READING THIS: GET OUT.',
         ],
         shareIcon:'🔒', shareLabel:'diary lock',
+      },
+      // Theme = mowing the lawns (D43/D44 — the paper run went to CHUTE).
+      // Brand-free; D15 sign-off owed. `name` is the working roster name: the
+      // theme rides on tag/ranks/banners, so renaming it is a one-string change.
+      round:{
+        name:'ROUND', tag:'MOW THE SECTION',
+        ranks:['PUSHED IT ONCE','BACK LAWN','FRONT AND BACK','WHOLE SECTION','STRIPES LIKE A PRO','GROUNDSKEEPER'],
+        ready:['SWIPE LEFT OR RIGHT TO SWAP STRIP','CUT THE LONG GRASS FOR POINTS','MISS THE HOSE, SPRINKLER AND BRICK'],
+        over:'MOWER PACKED IN',
+        stage:'STRIP DONE!', clean:'CLEAN SWEEP!', hit:'CLUNK!',
+        shareIcon:'🌱', shareLabel:'the lawns',
       },
     },
   },
@@ -4026,6 +4041,251 @@ const LOCK={
 };
 
 // ════════════════════════════════════════════════════════════════
+//  ROUND  (Phase 7.5 — the scrolling-dodge verb; nz90 theme: mowing the lawns)
+// ════════════════════════════════════════════════════════════════
+//  DETERMINISM (§3) — the WHOLE course is generated at stage start with a FIXED
+//  draw count: exactly 3 draws per row × (ROWS_BASE + stage·ROWS_INC) rows.
+//  ⚠ Spawn-as-you-scroll is BANNED here. That is precisely the WEAVER B1
+//  divergence: hazard count would track the player's pace and the shared stream
+//  would drift. Rows are dealt up front or not at all.
+//  Draws before stage N are therefore a pure function of N (a hit costs a life
+//  but never regenerates the course), so stage N is byte-identical for everyone —
+//  the same prefix property RECALL and LOCK have.
+//
+//  SOLVABLE BY CONSTRUCTION (D16, GUNGE/WEAVER precedent): a safe lane is carved
+//  first, one step (−1/0/+1) per row so it is always reachable with a single hop,
+//  and hazards are only ever placed in the OTHER two lanes. A row can never be
+//  fully blocked, so a clean run always exists — no generate-and-hope.
+//
+//  press/release consumer (D12), no drag — TAZO's coarse-swipe primitive. A hop
+//  is not cancellable mid-flight, and no held state exists, so B8 can't arise.
+const ROUND={
+  id:'round', // name/tag: skin pack
+  bestKey:'arc_round_best',
+  par:800, // PROVISIONAL — ~reaching stage 5 (D41 retunes all 15 together)
+  ranks:[{s:0},{s:150},{s:350},{s:800},{s:1400},{s:2200}], // thresholds only — titles from the pack (rule 12)
+  PAL_I:11,
+  LANES:3, FIELD_X:30, LANE_W:100,
+  PLAYER_Y:492, TOP_Y:140, BOT_Y:600,
+  ROW_GAP:78, LEAD_IN:200,
+  ROWS_BASE:16, ROWS_INC:2,                 // course length per stage
+  BASE_SPEED:150, SPEED_INC:16, SPEED_CAP:300, // px/s — capped so a hop always fits between rows
+  HOP_TIME:0.12, DIR_THRESH:30,
+  PICKUP:10, STAGE_BONUS:25, CLEAN_BONUS:40, // additive only — multiplicative scoring is the GUNGE par lesson
+  INVULN:0.9,
+  init(){
+    this.stage=0; this.lives=3; this.score=0;
+    this.lane=1; this.hopFrom=1; this.hopT=0;
+    this.invuln=0; this.shake=0; this.rejectAt=0; this.aim=null;
+    this.banner=null; this.trail=[];
+    this.genCourse(); this.resetCourse();
+    this.best=loadBest(this.bestKey);
+    this.newBest=false; this.st='ready'; this.overAt=0;
+    parts=[]; pops=[];
+  },
+  pal(){ return PALS[this.PAL_I]; },
+  rowCount(){ return this.ROWS_BASE+this.stage*this.ROWS_INC; },
+  speed(){ return Math.min(this.SPEED_CAP,this.BASE_SPEED+this.stage*this.SPEED_INC); },
+  // EXACTLY 3 seeded draws per row. Hazard art is derived from the index, not drawn.
+  genCourse(){
+    const n=this.rowCount();
+    this.rows=[]; let safe=1;
+    for(let i=0;i<n;i++){
+      const step=Math.floor(srnd(this)*3)-1;                       // draw 1 — safe lane walks ±1
+      safe=Math.max(0,Math.min(this.LANES-1,safe+step));
+      const mask=Math.floor(srnd(this)*4);                         // draw 2 — hazards on the two NON-safe lanes
+      const pick=Math.floor(srnd(this)*4);                         // draw 3 — pickup lane, 3 = none
+      const others=[]; for(let l=0;l<this.LANES;l++) if(l!==safe) others.push(l);
+      const haz=[false,false,false];
+      if(mask&1) haz[others[0]]=true;
+      if(mask&2) haz[others[1]]=true;
+      this.rows.push({haz,pick:pick<3?pick:-1,done:false,got:false,type:(i+safe)%3});
+    }
+  },
+  resetCourse(){ this.scroll=this.LEAD_IN; this.stageHits=0; this.trail=[]; },
+  courseLen(){ return this.PLAYER_Y+this.rowCount()*this.ROW_GAP; },
+  progress(){ return Math.max(0,Math.min(1,(this.scroll-this.LEAD_IN)/(this.courseLen()-this.LEAD_IN))); },
+  laneX(l){ return this.FIELD_X+l*this.LANE_W+this.LANE_W/2; },
+  rowY(i){ return this.scroll-i*this.ROW_GAP; },
+  playerX(){
+    if(this.hopT>0){
+      const u=1-this.hopT/this.HOP_TIME;
+      return this.laneX(this.hopFrom)+(this.laneX(this.lane)-this.laneX(this.hopFrom))*u;
+    }
+    return this.laneX(this.lane);
+  },
+  curLane(){ // nearest lane to where the mower actually IS — what you see is what you hit
+    const x=this.playerX(); let best=0,bd=1e9;
+    for(let l=0;l<this.LANES;l++){ const d=Math.abs(x-this.laneX(l)); if(d<bd){ bd=d; best=l; } }
+    return best;
+  },
+  hop(dir){
+    if(this.hopT>0) return;                                  // committed — not cancellable mid-hop
+    const t=this.lane+dir;
+    if(t<0||t>=this.LANES){ this.rejectAt=performance.now(); sTick(0.02); return; } // edge = free no-op (§9)
+    this.hopFrom=this.lane; this.lane=t; this.hopT=this.HOP_TIME; sTick(0.04); buzz(6);
+  },
+  start(){ this.st='play'; },
+  bump(){ if(this.score>this.best){ this.best=this.score; this.newBest=true; saveBest(this.bestKey,this.best); } },
+  hitHazard(){
+    if(this.st!=='play') return;   // one-shot: a double onOver would advance the daily twice
+    this.lives--; this.stageHits++; this.invuln=this.INVULN; this.shake=9;
+    burst(this.playerX(),this.PLAYER_Y,'#ff5a5a',16,2.6);
+    this.banner={t:S(this.id,'hit'),life:1.0};
+    sBad(); buzz(90);
+    if(this.lives<=0){ this.st='over'; this.overAt=performance.now(); if(this.onOver) this.onOver(); }
+  },
+  completeStage(){
+    const bonus=this.STAGE_BONUS*(this.stage+1);
+    let gain=bonus;
+    if(this.stageHits===0){
+      gain+=this.CLEAN_BONUS*(this.stage+1);
+      this.banner={t:S(this.id,'clean'),life:1.4}; sGold();
+    } else { this.banner={t:S(this.id,'stage'),life:1.2}; sStage(); }
+    this.score+=gain; this.bump(); buzz(18);
+    pop('+'+gain,W/2,300,'#ffd24a',13);
+    burst(W/2,this.PLAYER_Y-40,this.pal().ring,20,3);
+    this.stage++; this.genCourse(); this.resetCourse();
+  },
+  update(dt){
+    if(this.banner){ this.banner.life-=dt; if(this.banner.life<=0) this.banner=null; }
+    if(this.shake>0) this.shake=Math.max(0,this.shake-dt*22);
+    if(this.hopT>0) this.hopT=Math.max(0,this.hopT-dt);
+    if(this.st!=='play') return;
+    if(this.invuln>0) this.invuln=Math.max(0,this.invuln-dt);
+    this.scroll+=this.speed()*dt;
+    // cut stripe behind the mower — the world scrolls, so the trail scrolls with it
+    this.trail.forEach(t=>t.y+=this.speed()*dt);
+    this.trail.push({x:this.playerX(),y:this.PLAYER_Y});
+    while(this.trail.length&&this.trail[0].y>this.BOT_Y+20) this.trail.shift();
+    if(this.trail.length>90) this.trail.splice(0,this.trail.length-90);
+    const lane=this.curLane();
+    for(let i=0;i<this.rows.length;i++){
+      const r=this.rows[i];
+      if(r.done) continue;
+      if(this.rowY(i)>=this.PLAYER_Y){
+        r.done=true;
+        if(r.pick===lane){ r.got=true; this.score+=this.PICKUP; this.bump();
+          pop('+'+this.PICKUP,this.laneX(lane),this.PLAYER_Y-26,'#eaffd0',9);
+          burst(this.laneX(lane),this.PLAYER_Y,this.pal().glow,6,1.8); sHit(); }
+        if(r.haz[lane]&&this.invuln<=0){ this.hitHazard(); if(this.st!=='play') return; }
+      }
+    }
+    if(this.scroll>=this.courseLen()) this.completeStage();
+  },
+  // ── pointer stream (D12): press + release, no drag (TAZO's primitive) ──
+  press(x,y){ this.aim={x0:x,y0:y}; },
+  release(x,y){
+    const a=this.aim; this.aim=null;
+    if(!a||this.st!=='play') return;                        // pointercancel lands here too
+    const dx=x-a.x0, dy=y-a.y0;
+    if(Math.max(Math.abs(dx),Math.abs(dy))<this.DIR_THRESH){ this.rejectAt=performance.now(); sTick(0.02); return; } // §9
+    if(Math.abs(dx)<=Math.abs(dy)){ this.rejectAt=performance.now(); sTick(0.02); return; }  // vertical = free no-op
+    this.hop(dx>0?1:-1);
+  },
+  tap(x,y){
+    if(this.st==='ready'){ this.start(); return; }
+    if(this.st==='over'){ if(performance.now()-this.overAt>450){ this.init(); this.start(); } return; }
+    // during play the router routes to press/release — never here (D12)
+  },
+  drawTuft(x,y,s){
+    ctx.strokeStyle='#9dff6a'; ctx.lineWidth=2.2; ctx.lineCap='round';
+    for(let i=-2;i<=2;i++){
+      ctx.beginPath(); ctx.moveTo(x+i*4,y+s);
+      ctx.quadraticCurveTo(x+i*4+i*1.5,y,x+i*5.5,y-s*0.9); ctx.stroke();
+    }
+  },
+  drawHazard(t,x,y){
+    if(t===0){            // garden hose — a coiled loop
+      ctx.strokeStyle='#3ad8a0'; ctx.lineWidth=4; ctx.lineCap='round';
+      ctx.beginPath(); ctx.arc(x,y,13,0.5,Math.PI*1.9); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x+11,y+7); ctx.quadraticCurveTo(x+26,y+12,x+30,y-2); ctx.stroke();
+    } else if(t===1){     // sprinkler — head plus spray
+      ctx.fillStyle='#c8d4e0'; rr(x-9,y+2,18,9,3); ctx.fill();
+      ctx.fillStyle='#8a96a4'; rr(x-3,y-6,6,10,2); ctx.fill();
+      ctx.strokeStyle='#7ad8ff'; ctx.lineWidth=2; ctx.lineCap='round';
+      for(let i=-2;i<=2;i++){ const a=-Math.PI/2+i*0.42;
+        ctx.beginPath(); ctx.moveTo(x+Math.cos(a)*9,y-6+Math.sin(a)*9);
+        ctx.lineTo(x+Math.cos(a)*19,y-6+Math.sin(a)*19); ctx.stroke(); }
+    } else {              // the brick in the long grass
+      rr(x-14,y-8,28,16,2); ctx.fillStyle='#b4553a'; ctx.fill();
+      ctx.strokeStyle='#7d3524'; ctx.lineWidth=1.5; rr(x-14,y-8,28,16,2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x-14,y); ctx.lineTo(x+14,y); ctx.stroke();
+    }
+  },
+  drawMower(x,y){
+    ctx.save(); ctx.translate(x,y);
+    ctx.strokeStyle='#4a4a54'; ctx.lineWidth=3; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-2,-4); ctx.lineTo(-6,-24); ctx.stroke();   // handle
+    ctx.beginPath(); ctx.moveTo(-13,-24); ctx.lineTo(1,-24); ctx.stroke();
+    rr(-17,-8,34,17,4); ctx.fillStyle='#d94a3a'; ctx.fill();                // deck
+    ctx.strokeStyle='#8a2a1e'; ctx.lineWidth=1.5; rr(-17,-8,34,17,4); ctx.stroke();
+    rr(-11,-13,15,7,2); ctx.fillStyle='#3a3a44'; ctx.fill();                // engine
+    ctx.fillStyle='#2a2a32';
+    [[-11,10],[11,10]].forEach(w=>{ ctx.beginPath(); ctx.arc(w[0],w[1],5,0,Math.PI*2); ctx.fill(); });
+    ctx.fillStyle='#6a6a76';
+    [[-11,10],[11,10]].forEach(w=>{ ctx.beginPath(); ctx.arc(w[0],w[1],2,0,Math.PI*2); ctx.fill(); });
+    ctx.restore();
+  },
+  render(){
+    const p=this.pal();
+    ctx.save();
+    if(this.shake>0.4) ctx.translate((Math.random()-0.5)*this.shake,(Math.random()-0.5)*this.shake*0.7);
+    drawBG(p,this.TOP_Y);
+    // lawn strips
+    for(let l=0;l<this.LANES;l++){
+      ctx.fillStyle=l%2?'rgba(120,255,120,0.13)':'rgba(120,255,120,0.20)';
+      ctx.fillRect(this.FIELD_X+l*this.LANE_W,this.TOP_Y,this.LANE_W,this.BOT_Y-this.TOP_Y);
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1;
+    for(let l=1;l<this.LANES;l++){ const x=this.FIELD_X+l*this.LANE_W;
+      ctx.beginPath(); ctx.moveTo(x,this.TOP_Y); ctx.lineTo(x,this.BOT_Y); ctx.stroke(); }
+    // cut stripe behind the mower
+    ctx.save(); ctx.strokeStyle='rgba(20,70,24,0.85)'; ctx.lineWidth=30; ctx.lineJoin='round'; ctx.lineCap='round';
+    if(this.trail.length>1){ ctx.beginPath(); ctx.moveTo(this.trail[0].x,this.trail[0].y);
+      for(let i=1;i<this.trail.length;i++) ctx.lineTo(this.trail[i].x,this.trail[i].y); ctx.stroke(); }
+    ctx.restore();
+    // rows
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0,this.TOP_Y,W,this.BOT_Y-this.TOP_Y); ctx.clip();
+    for(let i=0;i<this.rows.length;i++){
+      const y=this.rowY(i);
+      if(y<this.TOP_Y-40||y>this.BOT_Y+40) continue;
+      const r=this.rows[i];
+      if(r.pick>=0&&!r.got) this.drawTuft(this.laneX(r.pick),y,9);
+      for(let l=0;l<this.LANES;l++) if(r.haz[l]) this.drawHazard(r.type,this.laneX(l),y);
+    }
+    ctx.restore();
+    // mower
+    if(!(this.invuln>0&&Math.floor(tick/3)%2)) this.drawMower(this.playerX(),this.PLAYER_Y);
+    drawFX();
+    // HUD
+    ctx.textAlign='center';
+    ctx.font='26px "Press Start 2P"'; ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=14;
+    ctx.fillText(this.score,W/2,76); ctx.shadowBlur=0;
+    ctx.font='7px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillText('BEST '+this.best,W/2,96);
+    for(let i=0;i<3;i++){ const lx=W/2-26+i*26; ctx.save(); ctx.globalAlpha=i<this.lives?1:0.18;
+      ctx.fillStyle=p.ring; rr(lx-5,105,10,10,2); ctx.fill(); ctx.restore(); }
+    ctx.font='6px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.45)'; ctx.fillText('STRIP '+(this.stage+1),W/2,128);
+    // distance IS the clock — a progress bar, not a timer
+    const bx=44, bw=W-88, f=this.progress();
+    rr(bx-1,133,bw+2,7,3); ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fill();
+    rr(bx,134,Math.max(0,bw*f),5,2); ctx.fillStyle=p.ring; ctx.fill();
+    if(this.rejectAt&&performance.now()-this.rejectAt<200){ ctx.save(); ctx.globalAlpha=0.10; ctx.fillStyle='#ff5a5a'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    if(this.banner){ const b=this.banner, a2=Math.min(1,b.life*2);
+      ctx.save(); ctx.globalAlpha=a2; ctx.textAlign='center'; ctx.font='12px "Press Start 2P"';
+      ctx.fillStyle='#fff'; ctx.shadowColor=p.glow; ctx.shadowBlur=16; ctx.fillText(b.t,W/2,190); ctx.restore(); }
+    const rk=rankFor(this.ranks,this.score);
+    ctx.textAlign='center'; ctx.font='7px "Press Start 2P"'; ctx.fillStyle=p.ring; ctx.fillText(rk.t,W/2,H-42);
+    const nx=nextRank(this.ranks,this.score);
+    if(nx){ ctx.font='5px "Press Start 2P"'; ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.fillText((nx.s-this.score)+' TO '+nx.t,W/2,H-26); }
+    ctx.restore();
+    if(this.st==='ready') drawReadyScreen(p,this.name,S(this.id,'ready'));
+    if(this.st==='over') drawOverScreen(p,S(this.id,'over'),this.score,this.best,this.newBest,rankFor(this.ranks,this.score).t,'STRIP '+(this.stage+1));
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  MENU + ROUTER
 // ════════════════════════════════════════════════════════════════
 // Menu/card order. NOT the daily order any more: since D33 the daily is a day-seeded
@@ -4033,14 +4293,14 @@ const LOCK={
 // paces the MENU. RECALL is therefore appended rather than slotted mid-array: at 11
 // games the last page held 3 cards and one gap, so appending fills that gap and moves
 // no existing card off its page or position (7.5 checklist item 6).
-const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL,LOCK];
+const GAMES=[STACK,SCAN,HOWLER,SWINGBALL,GUNGE,CHATTER,TAZO,SCRAMBLE,DAIRY,KNUCKLEBONES,WEAVER,RECALL,LOCK,ROUND];
 // ── Per-game menu/gauntlet palette — the ONE source of truth (§7). ─
 // Adding a game = add ONE line here. drawMenu, the gauntlet end-card, and
 // the persisted daily pid all read through gamePal/PALMAP, so a missing
 // entry degrades to the hub palette (PALS[2]) instead of throwing and
 // freezing the whole frame loop (the crash that shipped with GUNGE).
 // HOWLER reuses PALS[0] (§5.1); TAZO on PALS[7]; PALS[2] = hub palette.
-const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10,lock:4};
+const PALMAP={stack:0,scan:1,howler:0,swing:3,gunge:6,chatter:3,tazo:7,scramble:4,dairy:8,bones:5,weaver:9,recall:10,lock:4,round:11};
 function gamePal(id){ const i=PALMAP[id]; return PALS[i!=null?i:2]; }
 let mode='menu', cur=null, paused=false, menuPage=0;
 let tick=0, lastT=0;
@@ -4501,6 +4761,16 @@ function drawMenuIcon(g,cx,cy){
     // and the in-game charms can't drift apart (the HOWLER rocket precedent)
     LOCK.drawPadlock(0,-11,1.7,false);
     LOCK.drawSym(0,-17,17,7,false); LOCK.drawSym(1,0,17,7,false); LOCK.drawSym(3,17,17,7,false);
+  } else if(g.id==='round'){
+    // the mower part-way up a three-strip section: cut stripe behind, tufts ahead.
+    // Reuses ROUND's own draw calls so card and game can't drift.
+    const s=PALS[11];
+    for(let l=0;l<3;l++){ ctx.fillStyle=l%2?'rgba(90,232,90,0.10)':'rgba(90,232,90,0.18)';
+      ctx.fillRect(-24+l*16,-22,16,44); }
+    ctx.strokeStyle='rgba(20,70,24,0.9)'; ctx.lineWidth=11; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(0,4); ctx.lineTo(0,22); ctx.stroke();
+    ROUND.drawTuft(-20,2,5); ROUND.drawTuft(20,-5,5);
+    ctx.save(); ctx.scale(0.72,0.72); ROUND.drawMower(0,6); ctx.restore();
   } else {
     ctx.strokeStyle='#8a94a8'; ctx.lineWidth=5;
     ctx.beginPath(); ctx.arc(0,-2,20,0,Math.PI*2); ctx.stroke();
